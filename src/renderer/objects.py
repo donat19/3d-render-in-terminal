@@ -2,7 +2,7 @@
 
 from __future__ import annotations
 
-from typing import List
+from typing import List, Tuple
 
 from .engine import Mesh, Triangle, Vec3
 
@@ -53,5 +53,39 @@ def cube_mesh(size: float = 2.0) -> Mesh:
         Triangle((vertices["lbf"], vertices["rbf"], vertices["rbb"]), colours["bottom"]),
         Triangle((vertices["lbf"], vertices["rbb"], vertices["lbb"]), colours["bottom"]),
     ]
+
+    return Mesh(triangles)
+
+
+def floor_mesh(
+    size: float = 12.0,
+    *,
+    tiles: int = 10,
+    colours: Tuple[Tuple[int, int, int], Tuple[int, int, int]] = ((3, 3, 3), (2, 2, 2)),
+) -> Mesh:
+    """Return a checkerboard floor composed of triangles on the XZ plane."""
+
+    tiles = max(1, tiles)
+    half = size / 2.0
+    step = size / tiles
+    start = -half
+
+    triangles: List[Triangle] = []
+    for ix in range(tiles):
+        for iz in range(tiles):
+            x0 = start + ix * step
+            x1 = x0 + step
+            z0 = start + iz * step
+            z1 = z0 + step
+
+            colour = colours[(ix + iz) % len(colours)] if colours else (2, 2, 2)
+
+            v00 = Vec3(x0, 0.0, z0)
+            v10 = Vec3(x1, 0.0, z0)
+            v01 = Vec3(x0, 0.0, z1)
+            v11 = Vec3(x1, 0.0, z1)
+
+            triangles.append(Triangle((v00, v01, v11), colour))
+            triangles.append(Triangle((v00, v11, v10), colour))
 
     return Mesh(triangles)

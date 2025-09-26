@@ -8,7 +8,7 @@ import time
 from typing import Callable
 
 from .renderer.engine import Mesh, RenderEngine, Vec3
-from .renderer.objects import cube_mesh
+from .renderer.objects import cube_mesh, floor_mesh
 from .renderer.terminal import TerminalController
 
 
@@ -55,6 +55,28 @@ def parse_arguments() -> argparse.Namespace:
         default=0,
         help="Run for a fixed number of frames (0 = infinite)",
     )
+    parser.add_argument(
+        "--no-floor",
+        action="store_true",
+        help="Disable rendering the checkerboard ground plane",
+    )
+    parser.add_argument(
+        "--no-shadows",
+        action="store_true",
+        help="Disable shadow casting onto the floor",
+    )
+    parser.add_argument(
+        "--floor-size",
+        type=float,
+        default=12.0,
+        help="Edge length of the floor plane in world units",
+    )
+    parser.add_argument(
+        "--floor-tiles",
+        type=int,
+        default=10,
+        help="Number of checkerboard tiles per side",
+    )
     return parser.parse_args()
 
 
@@ -85,6 +107,11 @@ def run() -> None:
     fps = max(1.0, args.fps)
     frame_duration = 1.0 / fps
     mesh = _mesh_factory(args.object, args.scale)
+    floor = None if args.no_floor else floor_mesh(args.floor_size, tiles=max(1, args.floor_tiles))
+    floor_translation = Vec3(0.0, -0.5 * args.scale - 1.1, 0.0)
+    cast_shadows = floor is not None and not args.no_shadows
+    object_translation = Vec3(0.0, 0.0, 0.0)
+    floor_rotation = Vec3(0.0, 0.0, 0.0)
 
     with controller:
         width, height = controller.size_tuple()
@@ -117,7 +144,15 @@ def run() -> None:
                     rotation.z + rotation_velocity.z * delta,
                 )
 
-                frame = engine.render(mesh, rotation)
+                frame = engine.render(
+                    mesh,
+                    rotation,
+                    translation=object_translation,
+                    floor=floor,
+                    floor_rotation=floor_rotation,
+                    floor_translation=floor_translation,
+                    cast_shadows=cast_shadows,
+                )
                 controller.draw(frame)
 
                 frame_counter += 1

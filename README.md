@@ -7,8 +7,10 @@ Colourful real-time 3D rendering directly inside your terminal. The project proj
 - Pure Python 3.10+ implementation with no third-party dependencies.
 - Software rasteriser with back-face culling, depth buffering, and diffuse shading.
 - Vibrant ANSI 256-colour output with adaptive character shading.
+- High-resolution glyph gradient (ASCII + Unicode) for finer detail in the terminal.
 - Respects terminal resizes on the fly; just stretch the window for more pixels.
 - Easily customisable rotation speed, FOV, light direction, and render duration.
+- Checkerboard ground plane with dynamic shadows and enhanced lighting for depth cues.
 
 ## Requirements
 
@@ -50,6 +52,10 @@ Available flags:
 | `--scale` | Uniform mesh scale multiplier | `2.0` |
 | `--speed` | Rotation speed multiplier | `1.0` |
 | `--frames` | Render a fixed number of frames before exiting | `0` (run forever) |
+| `--no-floor` | Disable the checkerboard floor | `false` |
+| `--no-shadows` | Disable projected cube shadows | `false` |
+| `--floor-size` | Edge length of the floor plane (world units) | `12.0` |
+| `--floor-tiles` | Checkerboard tiles per side (higher = finer detail) | `10` |
 
 Feel free to resize the terminal while the renderer is running; the engine automatically adapts to the new resolution.
 

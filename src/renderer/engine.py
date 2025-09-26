@@ -4,7 +4,7 @@ from __future__ import annotations
 
 import math
 from dataclasses import dataclass
-from typing import Iterable, List, Optional, Sequence, Tuple
+from typing import List, Optional, Sequence, Tuple
 
 
 @dataclass(frozen=True)
@@ -87,7 +87,7 @@ class Mesh:
 class RenderEngine:
     """Software renderer producing ANSI-coloured frames for terminal output."""
 
-    _GRADIENT = " .:-=+*#%@"
+    _GRADIENT = " .'`^\",:;Il!i><~+_-?][}{1)(|\\/tfjrxnuvczXYUJCLQ0OZmwqpdbkhao*#MW&8%B@$"
 
     def __init__(
         self,
@@ -109,6 +109,7 @@ class RenderEngine:
         self.light_direction = light_direction.normalized()
         self.near_clip = near_clip
         self._aspect_ratio = self.width / self.height
+        self._shadow_colour = self._color_for_intensity((1, 1, 1), 0.35)
 
     def resize(self, width: int, height: int) -> None:
         if width < 2 or height < 2:
@@ -129,6 +130,11 @@ class RenderEngine:
         mesh: Mesh,
         rotation: Vec3,
         translation: Vec3 | None = None,
+        *,
+        floor: Mesh | None = None,
+        floor_rotation: Vec3 | None = None,
+        floor_translation: Vec3 | None = None,
+        cast_shadows: bool = False,
     ) -> str:
         if self.width < 10 or self.height < 10:
             return (
@@ -138,6 +144,10 @@ class RenderEngine:
 
         if translation is None:
             translation = Vec3(0.0, 0.0, 0.0)
+        if floor_rotation is None:
+            floor_rotation = Vec3(0.0, 0.0, 0.0)
+        if floor_translation is None:
+            floor_translation = Vec3(0.0, 0.0, 0.0)
 
         depth_buffer: List[List[float]] = [
             [float("inf")] * self.width for _ in range(self.height)
@@ -145,6 +155,65 @@ class RenderEngine:
         frame: List[List[Tuple[str, Optional[int]]]] = [
             [(" ", None) for _ in range(self.width)] for _ in range(self.height)
         ]
+
+        floor_height: Optional[float] = None
+
+        if floor is not None:
+            floor_height = floor_translation.y
+            for triangle in floor:
+                transformed_floor = [
+                    self._transform_vertex(vertex, floor_rotation, floor_translation)
+                    for vertex in triangle.vertices
+                ]
+
+                if any(vertex.z <= self.near_clip for vertex in transformed_floor):
+                    continue
+
+                normal = (transformed_floor[1] - transformed_floor[0]).cross(
+                    transformed_floor[2] - transformed_floor[0]
+                )
+                if normal.length_squared() <= 1e-8:
+                    continue
+                normal = normal.normalized()
+
+                centroid = (
+                    transformed_floor[0]
+                    + transformed_floor[1]
+                    + transformed_floor[2]
+                ) * (1.0 / 3.0)
+                to_camera = (-centroid).normalized()
+                if normal.dot(to_camera) <= 0:
+                    continue
+
+                illumination = self._compute_intensity(normal, to_camera)
+
+                projected_floor: List[Tuple[float, float, float]] = []
+                skip_triangle = False
+                for vertex in transformed_floor:
+                    projected_vertex = self._project(vertex)
+                    if projected_vertex is None:
+                        skip_triangle = True
+                        break
+                    projected_floor.append(projected_vertex)
+
+                if skip_triangle:
+                    continue
+
+                self._rasterize_triangle(
+                    projected_floor,
+                    transformed_floor,
+                    triangle.base_color,
+                    illumination,
+                    frame,
+                    depth_buffer,
+                )
+
+        object_drawables: List[
+            Tuple[List[Tuple[float, float, float]], Sequence[Vec3], Tuple[int, int, int], float]
+        ] = []
+        shadow_drawables: List[
+            Tuple[List[Tuple[float, float, float]], Sequence[Vec3]]
+        ] = []
 
         for triangle in mesh:
             transformed = [
@@ -169,7 +238,7 @@ class RenderEngine:
             if normal.dot(to_camera) <= 0:
                 continue
 
-            illumination = max(0.12, min(1.0, normal.dot(self.light_direction)))
+            illumination = self._compute_intensity(normal, to_camera)
 
             projected: List[Tuple[float, float, float]] = []
             skip_triangle = False
@@ -183,10 +252,50 @@ class RenderEngine:
             if skip_triangle:
                 continue
 
+            object_drawables.append((projected, transformed, triangle.base_color, illumination))
+
+            if (
+                cast_shadows
+                and floor is not None
+                and floor_height is not None
+                and self.light_direction.y > 1e-4
+            ):
+                shadow_vertices = self._project_shadow(transformed, floor_height)
+                if shadow_vertices is None:
+                    continue
+
+                projected_shadow: List[Tuple[float, float, float]] = []
+                skip_shadow = False
+                for vertex in shadow_vertices:
+                    projected_vertex = self._project(vertex)
+                    if projected_vertex is None:
+                        skip_shadow = True
+                        break
+                    projected_shadow.append(projected_vertex)
+
+                if skip_shadow:
+                    continue
+
+                shadow_drawables.append((projected_shadow, shadow_vertices))
+
+        for projected_shadow, shadow_vertices in shadow_drawables:
+            self._rasterize_triangle(
+                projected_shadow,
+                shadow_vertices,
+                (0, 0, 0),
+                0.0,
+                frame,
+                depth_buffer,
+                depth_bias=-1e-2,
+                char_override="▓",
+                color_override=self._shadow_colour,
+            )
+
+        for projected, transformed, colour, illumination in object_drawables:
             self._rasterize_triangle(
                 projected,
                 transformed,
-                triangle.base_color,
+                colour,
                 illumination,
                 frame,
                 depth_buffer,
@@ -241,6 +350,10 @@ class RenderEngine:
         illumination: float,
         frame: List[List[Tuple[str, Optional[int]]]],
         depth_buffer: List[List[float]],
+        *,
+        depth_bias: float = 0.0,
+        char_override: Optional[str] = None,
+        color_override: Optional[int] = None,
     ) -> None:
         p0, p1, p2 = projected
         x_coords = [p0[0], p1[0], p2[0]]
@@ -274,14 +387,50 @@ class RenderEngine:
                 if w0 < -1e-4 or w1 < -1e-4 or w2 < -1e-4:
                     continue
 
-                depth = w0 * z_values[0] + w1 * z_values[1] + w2 * z_values[2]
+                depth = (
+                    w0 * z_values[0]
+                    + w1 * z_values[1]
+                    + w2 * z_values[2]
+                    + depth_bias
+                )
                 if depth >= depth_buffer[y][x]:
                     continue
 
                 depth_buffer[y][x] = depth
-                char = self._char_for_intensity(illumination)
-                color = self._color_for_intensity(base_color, illumination)
+                char = char_override or self._char_for_intensity(illumination)
+                if color_override is not None:
+                    color = color_override
+                else:
+                    color = self._color_for_intensity(base_color, illumination)
                 frame[y][x] = (char, color)
+
+    def _compute_intensity(self, normal: Vec3, to_camera: Vec3) -> float:
+        ambient = 0.12
+        diffuse = max(0.0, normal.dot(self.light_direction))
+        halfway = (self.light_direction + to_camera).normalized()
+        specular = 0.0
+        if halfway.length_squared() > 1e-8:
+            specular = max(0.0, normal.dot(halfway)) ** 32
+        intensity = ambient + 0.85 * diffuse + 0.35 * specular
+        return max(0.0, min(1.0, intensity))
+
+    def _project_shadow(
+        self, vertices: Sequence[Vec3], floor_height: float
+    ) -> Optional[List[Vec3]]:
+        if abs(self.light_direction.y) <= 1e-4:
+            return None
+
+        projected: List[Vec3] = []
+        for vertex in vertices:
+            if vertex.y <= floor_height + 1e-4:
+                return None
+            t = (vertex.y - floor_height) / self.light_direction.y
+            if t <= 0:
+                return None
+            shadow_point = vertex - self.light_direction * t
+            projected.append(Vec3(shadow_point.x, floor_height + 1e-3, shadow_point.z))
+
+        return projected
 
     def _char_for_intensity(self, intensity: float) -> str:
         idx = int(max(0, min(len(self._GRADIENT) - 1, round(intensity * (len(self._GRADIENT) - 1)))))

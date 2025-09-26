@@ -1,7 +1,7 @@
-import math
 import unittest
 
 from src.renderer.engine import RenderEngine, Vec3
+from src.renderer.objects import cube_mesh, floor_mesh
 
 
 class ProjectionTests(unittest.TestCase):
@@ -28,6 +28,25 @@ class ProjectionTests(unittest.TestCase):
 
         unit = Vec3(2.0, 0.0, 0.0).normalized()
         self.assertAlmostEqual(unit.length(), 1.0)
+
+    def test_floor_mesh_tile_count(self) -> None:
+        mesh = floor_mesh(size=8.0, tiles=4)
+        self.assertEqual(len(mesh.triangles), 4 * 4 * 2)
+
+    def test_shadow_renders_on_floor(self) -> None:
+        engine = RenderEngine(120, 60, fov_degrees=70.0, camera_distance=6.0)
+        cube = cube_mesh(2.0)
+        floor = floor_mesh(size=10.0, tiles=6)
+        frame = engine.render(
+            cube,
+            rotation=Vec3(0.3, 0.9, 0.1),
+            translation=Vec3(0.0, 0.0, 0.0),
+            floor=floor,
+            floor_rotation=Vec3(0.0, 0.0, 0.0),
+            floor_translation=Vec3(0.0, -2.0, 0.0),
+            cast_shadows=True,
+        )
+        self.assertIn("▓", frame)
 
 
 if __name__ == "__main__":
