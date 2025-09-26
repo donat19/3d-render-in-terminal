@@ -70,7 +70,7 @@ class ProjectionTests(unittest.TestCase):
             hud=("FPS 60.0",),
             hud_color=None,
         )
-        first_line = frame.splitlines()[0]
+        first_line = str(frame).splitlines()[0]
         self.assertIn("FPS 60.0", first_line)
 
     def test_cornell_box_mesh_not_empty(self) -> None:
