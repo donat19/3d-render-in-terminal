@@ -100,6 +100,24 @@ def parse_arguments() -> argparse.Namespace:
         default=2,
         help="Maximum number of recursive reflection bounces (default: 2)",
     )
+    parser.add_argument(
+        "--ambient",
+        type=float,
+        default=0.22,
+        help="Ambient light strength (default: 0.22)",
+    )
+    parser.add_argument(
+        "--gi-strength",
+        type=float,
+        default=0.35,
+        help="Sky/ground global illumination strength (default: 0.35)",
+    )
+    parser.add_argument(
+        "--sun-intensity",
+        type=float,
+        default=1.4,
+        help="Sun disk intensity multiplier (default: 1.4)",
+    )
     return parser.parse_args()
 
 
@@ -205,6 +223,9 @@ def run() -> None:
             light_direction=light,
             max_reflection_depth=reflection_depth,
             sampling_step=pixel_step,
+            ambient_strength=max(0.0, args.ambient),
+            sun_intensity=max(0.0, args.sun_intensity),
+            gi_strength=max(0.0, args.gi_strength),
         )
 
         if is_cornell and args.fov == 70.0:

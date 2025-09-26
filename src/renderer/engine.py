@@ -130,6 +130,17 @@ class RenderEngine:
         near_clip: float = 0.1,
         max_reflection_depth: int = 2,
         sampling_step: int = 1,
+        ambient_strength: float = 0.2,
+        sun_intensity: float = 1.0,
+        sun_color: Tuple[float, float, float] = (1.0, 0.97, 0.85),
+        sun_diffuse_strength: float = 0.85,
+        sun_specular_strength: float = 0.3,
+        sun_specular_exponent: float = 32.0,
+        sun_angular_radius_degrees: float = 0.53,
+        gi_strength: float = 0.35,
+        sky_color_top: Tuple[float, float, float] = (0.25, 0.45, 0.85),
+        sky_color_horizon: Tuple[float, float, float] = (0.85, 0.78, 0.62),
+        ground_color: Tuple[float, float, float] = (0.35, 0.30, 0.28),
     ) -> None:
         if width < 2 or height < 2:
             raise ValueError("RenderEngine requires width and height >= 2")
@@ -144,6 +155,23 @@ class RenderEngine:
         self._aspect_ratio = self.width / self.height
         self._max_reflection_depth = max(0, int(max_reflection_depth))
         self._sampling_step = max(1, int(sampling_step))
+        self._ambient_strength = max(0.0, ambient_strength)
+        self._sun_intensity = max(0.0, sun_intensity)
+        self._sun_color = self._clamp_rgb(sun_color)
+        self._sun_diffuse_strength = max(0.0, sun_diffuse_strength)
+        self._sun_specular_strength = max(0.0, sun_specular_strength)
+        self._sun_specular_exponent = max(1.0, sun_specular_exponent)
+        self._gi_strength = max(0.0, gi_strength)
+        self._sky_color_top = self._clamp_rgb(sky_color_top)
+        self._sky_color_horizon = self._clamp_rgb(sky_color_horizon)
+        self._ground_color = self._clamp_rgb(ground_color)
+        sun_radius = max(0.05, sun_angular_radius_degrees)
+        self._sun_cos_core = math.cos(math.radians(sun_radius))
+        self._sun_cos_halo = math.cos(math.radians(min(90.0, sun_radius * 3.0)))
+        if self._sun_cos_halo > self._sun_cos_core:
+            self._sun_cos_halo, self._sun_cos_core = self._sun_cos_core, self._sun_cos_halo
+        self._up_vector = Vec3(0.0, 1.0, 0.0)
+        self._horizon_haze_strength = 0.5
         self._ray_cache = None
         self._ray_cache_key = None
 
@@ -376,9 +404,88 @@ class RenderEngine:
         self._ray_cache_key = key
         return rays
 
+    def _environment_color(self, direction: Vec3) -> Tuple[float, float, float]:
+        y = max(-1.0, min(1.0, direction.y))
+        abs_y = abs(y)
+        horizon_mix = (1.0 - abs_y) ** 2
+
+        if y >= 0.0:
+            sky_t = y ** 0.35
+            base = self._lerp_rgb(self._sky_color_horizon, self._sky_color_top, sky_t)
+        else:
+            ground_t = (-y) ** 0.45
+            darker_ground = (
+                self._ground_color[0] * 0.35,
+                self._ground_color[1] * 0.35,
+                self._ground_color[2] * 0.35,
+            )
+            base = self._lerp_rgb(self._ground_color, darker_ground, ground_t)
+
+        if horizon_mix > 0.0:
+            base = self._lerp_rgb(
+                base,
+                self._sky_color_horizon,
+                min(1.0, horizon_mix * self._horizon_haze_strength),
+            )
+
+        cos_angle = direction.dot(self.light_direction)
+        sun_factor = 0.0
+        if cos_angle >= self._sun_cos_core:
+            sun_factor = 1.0
+        elif cos_angle >= self._sun_cos_halo:
+            denom = self._sun_cos_core - self._sun_cos_halo
+            if denom > 1e-6:
+                sun_factor = (cos_angle - self._sun_cos_halo) / denom
+                sun_factor *= sun_factor
+
+        if sun_factor > 0.0:
+            sun_strength = self._sun_intensity * (0.35 + 0.65 * sun_factor)
+            base = (
+                base[0] + self._sun_color[0] * sun_strength,
+                base[1] + self._sun_color[1] * sun_strength,
+                base[2] + self._sun_color[2] * sun_strength,
+            )
+
+        return self._clamp_rgb(base)
+
+    def _global_illumination_contribution(self, normal: Vec3) -> Tuple[float, float, float]:
+        if self._gi_strength <= 1e-6:
+            return (0.0, 0.0, 0.0)
+
+        n = normal.normalized()
+        up_dot = max(0.0, n.dot(self._up_vector))
+        down_dot = max(0.0, n.dot(-self._up_vector))
+        horizon = max(0.0, 1.0 - abs(n.y))
+
+        sky_rgb = self._lerp_rgb(self._sky_color_horizon, self._sky_color_top, up_dot ** 0.5)
+        ground_rgb = self._ground_color
+        horizon_rgb = self._sky_color_horizon
+
+        bounce = (
+            sky_rgb[0] * up_dot + horizon_rgb[0] * horizon * 0.25 + ground_rgb[0] * down_dot * 0.6,
+            sky_rgb[1] * up_dot + horizon_rgb[1] * horizon * 0.25 + ground_rgb[1] * down_dot * 0.6,
+            sky_rgb[2] * up_dot + horizon_rgb[2] * horizon * 0.25 + ground_rgb[2] * down_dot * 0.6,
+        )
+
+        strength = self._gi_strength
+        return (
+            bounce[0] * strength,
+            bounce[1] * strength,
+            bounce[2] * strength,
+        )
+
     def _invalidate_ray_cache(self) -> None:
         self._ray_cache = None
         self._ray_cache_key = None
+
+    @staticmethod
+    def _lerp_rgb(a: Tuple[float, float, float], b: Tuple[float, float, float], t: float) -> Tuple[float, float, float]:
+        t = max(0.0, min(1.0, t))
+        return (
+            a[0] + (b[0] - a[0]) * t,
+            a[1] + (b[1] - a[1]) * t,
+            a[2] + (b[2] - a[2]) * t,
+        )
 
     def _project(self, vertex: Vec3) -> Optional[Tuple[float, float, float]]:
         if vertex.z <= self.near_clip:
@@ -404,7 +511,7 @@ class RenderEngine:
     ) -> Optional[TraceResult]:
         hit = self._closest_intersection(origin, direction, triangles)
         if hit is None:
-            return None
+            return TraceResult(self._environment_color(direction))
 
         normal = hit.normal
         if normal.dot(direction) > 0:
@@ -440,6 +547,14 @@ class RenderEngine:
                     (1.0 - blend) * base_rgb[1] + blend * reflection.rgb[1],
                     (1.0 - blend) * base_rgb[2] + blend * reflection.rgb[2],
                 )
+
+        if self._gi_strength > 1e-6:
+            gi_rgb = self._global_illumination_contribution(normal)
+            base_rgb = (
+                base_rgb[0] + gi_rgb[0],
+                base_rgb[1] + gi_rgb[1],
+                base_rgb[2] + gi_rgb[2],
+            )
 
         return TraceResult(self._clamp_rgb(base_rgb))
 
@@ -505,17 +620,21 @@ class RenderEngine:
     def _lighting_intensity(
         self, normal: Vec3, to_camera: Vec3, in_shadow: bool
     ) -> float:
-        ambient = 0.18
+        ambient = self._ambient_strength
+
         if in_shadow:
-            return ambient
+            return min(1.0, ambient)
 
         diffuse = max(0.0, normal.dot(self.light_direction))
         halfway = (self.light_direction + to_camera).normalized()
         specular = 0.0
         if halfway.length_squared() > 1e-8:
-            specular = max(0.0, normal.dot(halfway)) ** 24
+            specular = max(0.0, normal.dot(halfway)) ** self._sun_specular_exponent
 
-        intensity = ambient + 0.72 * diffuse + 0.28 * specular
+        intensity = ambient
+        intensity += self._sun_diffuse_strength * diffuse
+        intensity += self._sun_specular_strength * specular
+
         return max(0.0, min(1.0, intensity))
 
     def _is_in_shadow(
