@@ -66,6 +66,11 @@ def parse_arguments() -> argparse.Namespace:
         help="Disable shadow casting onto the floor",
     )
     parser.add_argument(
+        "--no-reflections",
+        action="store_true",
+        help="Disable reflective floor rendering",
+    )
+    parser.add_argument(
         "--floor-size",
         type=float,
         default=12.0,
@@ -110,6 +115,7 @@ def run() -> None:
     floor = None if args.no_floor else floor_mesh(args.floor_size, tiles=max(1, args.floor_tiles))
     floor_translation = Vec3(0.0, -0.5 * args.scale - 1.1, 0.0)
     cast_shadows = floor is not None and not args.no_shadows
+    enable_reflections = floor is not None and not args.no_reflections
     object_translation = Vec3(0.0, 0.0, 0.0)
     floor_rotation = Vec3(0.0, 0.0, 0.0)
 
@@ -128,12 +134,15 @@ def run() -> None:
 
         frame_counter = 0
         last_time = time.perf_counter()
+        smoothed_fps = max(1.0, args.fps)
 
         try:
             while True:
                 now = time.perf_counter()
                 delta = now - last_time
                 last_time = now
+                instantaneous_fps = 1.0 / max(delta, 1e-6)
+                smoothed_fps = smoothed_fps * 0.85 + instantaneous_fps * 0.15
 
                 width, height = controller.size_tuple()
                 engine.resize(width, height)
@@ -144,6 +153,8 @@ def run() -> None:
                     rotation.z + rotation_velocity.z * delta,
                 )
 
+                hud_lines = (f"FPS {smoothed_fps:5.1f}",)
+
                 frame = engine.render(
                     mesh,
                     rotation,
@@ -152,6 +163,9 @@ def run() -> None:
                     floor_rotation=floor_rotation,
                     floor_translation=floor_translation,
                     cast_shadows=cast_shadows,
+                    enable_reflections=enable_reflections,
+                    hud=hud_lines,
+                    hud_color=252,
                 )
                 controller.draw(frame)
 

@@ -135,6 +135,9 @@ class RenderEngine:
         floor_rotation: Vec3 | None = None,
         floor_translation: Vec3 | None = None,
         cast_shadows: bool = False,
+        enable_reflections: bool = True,
+        hud: Optional[Sequence[str]] = None,
+        hud_color: Optional[int] = 250,
     ) -> str:
         if self.width < 10 or self.height < 10:
             return (
@@ -214,6 +217,9 @@ class RenderEngine:
         shadow_drawables: List[
             Tuple[List[Tuple[float, float, float]], Sequence[Vec3]]
         ] = []
+        reflection_drawables: List[
+            Tuple[List[Tuple[float, float, float]], Sequence[Vec3], Tuple[int, int, int], float]
+        ] = []
 
         for triangle in mesh:
             transformed = [
@@ -278,6 +284,53 @@ class RenderEngine:
 
                 shadow_drawables.append((projected_shadow, shadow_vertices))
 
+            if (
+                enable_reflections
+                and floor is not None
+                and floor_height is not None
+            ):
+                reflection = self._reflect_vertices(transformed, floor_height)
+                if reflection is None:
+                    continue
+
+                reflection_projected: List[Tuple[float, float, float]] = []
+                skip_reflection = False
+                for vertex in reflection:
+                    projected_vertex = self._project(vertex)
+                    if projected_vertex is None:
+                        skip_reflection = True
+                        break
+                    reflection_projected.append(projected_vertex)
+
+                if skip_reflection:
+                    continue
+
+                normal_reflection = (reflection[1] - reflection[0]).cross(
+                    reflection[2] - reflection[0]
+                )
+                if normal_reflection.length_squared() <= 1e-8:
+                    continue
+                normal_reflection = normal_reflection.normalized()
+
+                centroid_reflection = (
+                    reflection[0] + reflection[1] + reflection[2]
+                ) * (1.0 / 3.0)
+                to_camera_reflection = (-centroid_reflection).normalized()
+                if normal_reflection.dot(to_camera_reflection) <= 0:
+                    continue
+
+                reflection_intensity = self._compute_intensity(
+                    normal_reflection, to_camera_reflection
+                )
+                reflection_drawables.append(
+                    (
+                        reflection_projected,
+                        reflection,
+                        triangle.base_color,
+                        reflection_intensity * 0.55,
+                    )
+                )
+
         for projected_shadow, shadow_vertices in shadow_drawables:
             self._rasterize_triangle(
                 projected_shadow,
@@ -291,6 +344,17 @@ class RenderEngine:
                 color_override=self._shadow_colour,
             )
 
+        for projected_reflection, reflection_vertices, colour, illumination in reflection_drawables:
+            self._rasterize_triangle(
+                projected_reflection,
+                reflection_vertices,
+                colour,
+                illumination,
+                frame,
+                depth_buffer,
+                depth_bias=-5e-3,
+            )
+
         for projected, transformed, colour, illumination in object_drawables:
             self._rasterize_triangle(
                 projected,
@@ -300,6 +364,9 @@ class RenderEngine:
                 frame,
                 depth_buffer,
             )
+
+        if hud:
+            self._blit_hud(frame, hud, hud_color)
 
         return self._compose_frame(frame)
 
@@ -432,6 +499,23 @@ class RenderEngine:
 
         return projected
 
+    def _reflect_vertices(
+        self, vertices: Sequence[Vec3], floor_height: float
+    ) -> Optional[List[Vec3]]:
+        reflected = []
+        for vertex in vertices:
+            mirrored_y = floor_height - (vertex.y - floor_height)
+            reflected_vertex = Vec3(vertex.x, mirrored_y + 1e-3, vertex.z)
+            if reflected_vertex.z <= self.near_clip:
+                return None
+            reflected.append(reflected_vertex)
+
+        if len(reflected) != 3:
+            return None
+
+        reflected[1], reflected[2] = reflected[2], reflected[1]
+        return reflected
+
     def _char_for_intensity(self, intensity: float) -> str:
         intensity = max(0.0, min(1.0, intensity)) ** 0.8
         idx = int(max(0, min(len(self._GRADIENT) - 1, round(intensity * (len(self._GRADIENT) - 1)))))
@@ -475,3 +559,22 @@ class RenderEngine:
                 parts.append(reset)
             lines.append("".join(parts))
         return "\n".join(lines)
+
+    def _blit_hud(
+        self,
+        frame: List[List[Tuple[str, Optional[int]]]],
+        lines: Sequence[str],
+        color: Optional[int],
+    ) -> None:
+        if not lines:
+            return
+        max_width = max(len(line) for line in lines)
+        start_x = max(0, self.width - max_width - 1)
+        for row_offset, line in enumerate(lines):
+            if row_offset >= self.height:
+                break
+            x = start_x
+            for char in line:
+                if 0 <= x < self.width:
+                    frame[row_offset][x] = (char, color)
+                x += 1

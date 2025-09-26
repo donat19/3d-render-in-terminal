@@ -48,6 +48,18 @@ class ProjectionTests(unittest.TestCase):
         )
         self.assertIn("▓", frame)
 
+    def test_hud_overlay_displays_text(self) -> None:
+        engine = RenderEngine(60, 30, fov_degrees=70.0, camera_distance=6.0)
+        cube = cube_mesh(1.5)
+        frame = engine.render(
+            cube,
+            rotation=Vec3(0.0, 0.0, 0.0),
+            hud=("FPS 60.0",),
+            hud_color=None,
+        )
+        first_line = frame.splitlines()[0]
+        self.assertIn("FPS 60.0", first_line)
+
 
 if __name__ == "__main__":
     unittest.main()

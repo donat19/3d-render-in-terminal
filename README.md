@@ -10,7 +10,8 @@ Colourful real-time 3D rendering directly inside your terminal. The project proj
 - High-resolution glyph gradient (ASCII + Unicode) for finer detail in the terminal.
 - Respects terminal resizes on the fly; just stretch the window for more pixels.
 - Easily customisable rotation speed, FOV, light direction, and render duration.
-- Checkerboard ground plane with dynamic shadows and enhanced lighting for depth cues.
+- Checkerboard ground plane with dynamic shadows, floor reflections, and enhanced lighting for depth cues.
+- Integrated HUD overlay (FPS counter in the top-right corner by default).
 
 ## Requirements
 
@@ -54,6 +55,7 @@ Available flags:
 | `--frames` | Render a fixed number of frames before exiting | `0` (run forever) |
 | `--no-floor` | Disable the checkerboard floor | `false` |
 | `--no-shadows` | Disable projected cube shadows | `false` |
+| `--no-reflections` | Disable reflective floor rendering | `false` |
 | `--floor-size` | Edge length of the floor plane (world units) | `12.0` |
 | `--floor-tiles` | Checkerboard tiles per side (higher = finer detail) | `10` |
 
