@@ -1,0 +1,26 @@
+[build-system]
+requires = ["setuptools>=64", "wheel"]
+build-backend = "setuptools.build_meta"
+
+[project]
+name = "terminal-3d-renderer"
+version = "0.1.0"
+description = "Colourful ANSI-based 3D renderer for the terminal"
+readme = "README.md"
+authors = [{ name = "droid" }]
+requires-python = ">=3.10"
+license = "MIT"
+keywords = ["terminal", "3d", "renderer", "ansi", "demo"]
+classifiers = [
+    "Programming Language :: Python :: 3",
+    "Programming Language :: Python :: 3.10",
+    "Environment :: Console",
+    "Topic :: Multimedia :: Graphics :: 3D Rendering",
+]
+dependencies = []
+
+[project.scripts]
+terminal-renderer = "src.main:main"
+
+[tool.setuptools.packages.find]
+where = ["src"]

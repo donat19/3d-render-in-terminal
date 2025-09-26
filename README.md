@@ -1,0 +1,121 @@
+# Terminal 3D Renderer
+
+Colourful real-time 3D rendering directly inside your terminal. The project projects and shades triangle meshes, writes ANSI 256-colour frames, and is tuned to run smoothly on plain Debian GNU/Linux shells (tested on Debian 12, kernel 6.1 on ARM64).
+
+## Highlights
+
+- Pure Python 3.10+ implementation with no third-party dependencies.
+- Software rasteriser with back-face culling, depth buffering, and diffuse shading.
+- Vibrant ANSI 256-colour output with adaptive character shading.
+- Respects terminal resizes on the fly; just stretch the window for more pixels.
+- Easily customisable rotation speed, FOV, light direction, and render duration.
+
+## Requirements
+
+- Python 3.10 or newer.
+- A terminal that supports ANSI escape sequences (most modern shells, including Debian's default `bash`/`dash`/`zsh`).
+
+## Setup
+
+After cloning, you can bootstrap everything with `make` (uses Python 3.10+):
+
+```bash
+make install
+```
+
+This creates a `.venv/` virtual environment and installs the package in editable mode. If you prefer to manage environments yourself, run `pip install -e .` inside whatever Python environment you choose.
+
+## Run the demo
+
+With the virtual environment prepared, launch the animation:
+
+```bash
+make run
+```
+
+The `run` target simply calls the installed console script `terminal-renderer`. To tweak parameters manually you can invoke it directly:
+
+```bash
+.venv/bin/terminal-renderer --fps 24 --fov 70 --scale 2.0
+```
+
+Available flags:
+
+| Flag | Description | Default |
+| --- | --- | --- |
+| `--fps` | Target frames per second | `20` |
+| `--fov` | Field of view in degrees | `70` |
+| `--distance` | Camera distance from mesh centre | `5` |
+| `--light X Y Z` | Directional light vector | `-0.4 0.8 -0.6` |
+| `--scale` | Uniform mesh scale multiplier | `2.0` |
+| `--speed` | Rotation speed multiplier | `1.0` |
+| `--frames` | Render a fixed number of frames before exiting | `0` (run forever) |
+
+Feel free to resize the terminal while the renderer is running; the engine automatically adapts to the new resolution.
+
+## Tests
+
+All logic-level tests use Python's built-in `unittest` runner.
+
+```bash
+make test
+```
+
+## Debian 12 (ARM64) quickstart
+
+The renderer was tuned on Debian GNU/Linux 12 (bookworm) running on AArch64, e.g. `Linux localhost 6.1.0-34-avf-arm64 #1 SMP Debian 6.1.135-1 (2025-04-25) aarch64`. Follow these steps after logging in as your regular user:
+
+1. Install the base tooling (Git, Python, venv, Make):
+
+	```bash
+	sudo apt update
+	sudo apt install -y git python3 python3-venv python3-pip make
+	```
+
+2. Clone the repository and change into it:
+
+	```bash
+	git clone https://github.com/<your-account>/terminal-3d-renderer.git
+	cd terminal-3d-renderer
+	```
+
+3. Create the virtual environment and install the package in editable mode:
+
+	```bash
+	make install
+	```
+
+4. Launch the rotating cube demo (Ctrl+C to stop):
+
+	```bash
+	make run
+	```
+
+5. Optional maintenance commands:
+
+	```bash
+	make test      # run the unit tests
+	make package   # build wheel + sdist into dist/
+	make distclean # remove .venv and temporary artifacts
+	```
+
+Feel free to resize the terminal while it runs; the engine adapts automatically.
+
+## Build distribution artifacts
+
+Generate wheel and sdist packages via:
+
+```bash
+make package
+```
+
+## How it works
+
+- `src/renderer/engine.py` implements vector math, perspective projection, triangle rasterisation, a simple diffuse lighting model, and ANSI colour mapping.
+- `src/renderer/objects.py` contains ready-made meshes (currently a colourful cube) described via triangles.
+- `src/renderer/terminal.py` hides cursor flicker, handles clearing, and streams frames to the terminal.
+- `src/main.py` glues everything together into a CLI-driven animation loop with adaptive frame timing.
+
+The renderer uses a z-buffer to resolve visibility, back-face culling to skip hidden surfaces, and a small ASCII gradient to add depth perception in addition to colours.
+
+Enjoy exploring and tweaking the parameters to craft your own terminal art!

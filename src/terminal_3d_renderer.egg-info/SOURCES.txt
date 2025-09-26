@@ -1,0 +1,13 @@
+LICENSE
+README.md
+pyproject.toml
+src/renderer/__init__.py
+src/renderer/engine.py
+src/renderer/objects.py
+src/renderer/terminal.py
+src/terminal_3d_renderer.egg-info/PKG-INFO
+src/terminal_3d_renderer.egg-info/SOURCES.txt
+src/terminal_3d_renderer.egg-info/dependency_links.txt
+src/terminal_3d_renderer.egg-info/entry_points.txt
+src/terminal_3d_renderer.egg-info/top_level.txt
+tests/test_projection.py

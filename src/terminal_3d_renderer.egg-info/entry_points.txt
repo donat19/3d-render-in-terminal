@@ -1,0 +1,2 @@
+[console_scripts]
+terminal-renderer = src.main:main
