@@ -61,6 +61,8 @@ Available flags:
 | `--floor-size` | Edge length of the floor plane (world units) | `12.0` |
 | `--floor-tiles` | Checkerboard tiles per side (higher = finer detail) | `10` |
 | `--gpu` | Experimental DRM/KMS output (requires root + libdrm, falls back if unavailable) | disabled |
+| `--pixel-step` | Render every Nth pixel and fill the gaps (higher = faster, lower detail) | `1` |
+| `--reflection-depth` | Maximum recursive reflection depth | `2` |
 
 Feel free to resize the terminal while the renderer is running; the engine automatically adapts to the new resolution.
 
@@ -73,6 +75,8 @@ If your machine exposes a `/dev/dri/card*` node and you have `libdrm` installed,
 ```
 
 This path tries to set the process as the DRM master, creates a dumb buffer, and scans it out through the primary CRTC. The renderer renders into a matrix instead of ANSI strings, which removes most of the terminal overhead. The feature currently requires root (or appropriate udev rules) and only targets simple XRGB8888 framebuffers; if initialisation fails the program falls back to the regular terminal output and prints a warning.
+
+When GPU mode is enabled without explicit quality flags, the renderer automatically bumps `--pixel-step` to `2` and caps `--reflection-depth` to `1` to keep frame times manageable on low-power hardware. You can still override either value manually.
 
 ## Tests
 

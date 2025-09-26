@@ -88,6 +88,18 @@ def parse_arguments() -> argparse.Namespace:
         action="store_true",
         help="Use experimental DRM/KMS presenter instead of ANSI output",
     )
+    parser.add_argument(
+        "--pixel-step",
+        type=int,
+        default=1,
+        help="Render every Nth pixel and fill neighbouring cells (default: 1)",
+    )
+    parser.add_argument(
+        "--reflection-depth",
+        type=int,
+        default=2,
+        help="Maximum number of recursive reflection bounces (default: 2)",
+    )
     return parser.parse_args()
 
 
@@ -172,6 +184,17 @@ def run() -> None:
     if is_cornell and camera_distance < 6.0:
         camera_distance = 6.0
 
+    pixel_step = max(1, args.pixel_step)
+    reflection_depth = max(0, args.reflection_depth)
+    if using_gpu and args.pixel_step == 1:
+        pixel_step = 2
+        sys.stderr.write("[renderer] GPU mode: auto pixel-step set to 2 for performance.\n")
+        sys.stderr.flush()
+    if using_gpu and args.reflection_depth > 1:
+        reflection_depth = 1
+        sys.stderr.write("[renderer] GPU mode: limiting reflection depth to 1 for performance.\n")
+        sys.stderr.flush()
+
     with display_context as active_display:
         width, height = active_display.size_tuple()
         engine = RenderEngine(
@@ -180,6 +203,8 @@ def run() -> None:
             fov_degrees=args.fov,
             camera_distance=camera_distance,
             light_direction=light,
+            max_reflection_depth=reflection_depth,
+            sampling_step=pixel_step,
         )
 
         if is_cornell and args.fov == 70.0:

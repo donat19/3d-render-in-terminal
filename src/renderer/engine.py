@@ -128,6 +128,8 @@ class RenderEngine:
         camera_distance: float = 5.0,
         light_direction: Vec3 = Vec3(-0.4, 0.8, -0.6),
         near_clip: float = 0.1,
+        max_reflection_depth: int = 2,
+        sampling_step: int = 1,
     ) -> None:
         if width < 2 or height < 2:
             raise ValueError("RenderEngine requires width and height >= 2")
@@ -140,7 +142,8 @@ class RenderEngine:
         self.light_direction = light_direction.normalized()
         self.near_clip = near_clip
         self._aspect_ratio = self.width / self.height
-        self._max_reflection_depth = 2
+        self._max_reflection_depth = max(0, int(max_reflection_depth))
+        self._sampling_step = max(1, int(sampling_step))
         self._ray_cache = None
         self._ray_cache_key = None
 
@@ -157,6 +160,12 @@ class RenderEngine:
         self._fov_radians = math.radians(fov_degrees)
         self._tan_half_fov = math.tan(self._fov_radians / 2.0)
         self._invalidate_ray_cache()
+
+    def set_max_reflection_depth(self, depth: int) -> None:
+        self._max_reflection_depth = max(0, int(depth))
+
+    def set_sampling_step(self, step: int) -> None:
+        self._sampling_step = max(1, int(step))
 
     def project_point(self, vertex: Vec3) -> Optional[Tuple[float, float, float]]:
         return self._project(vertex)
@@ -212,10 +221,13 @@ class RenderEngine:
         char_for_intensity = self._char_for_intensity
         ansi_from_rgb = self._ansi_from_rgb
 
-        for y in range(self.height):
-            frame_row = frame[y]
+        sampling_step = self._sampling_step
+        height = self.height
+        width = self.width
+
+        for y in range(0, height, sampling_step):
             ray_row = ray_cache[y]
-            for x in range(self.width):
+            for x in range(0, width, sampling_step):
                 direction = ray_row[x]
                 traced = trace_ray(
                     camera_origin,
@@ -234,7 +246,12 @@ class RenderEngine:
 
                 char = char_for_intensity(luminance)
                 color_code = ansi_from_rgb(traced.rgb)
-                frame_row[x] = (char, color_code)
+                block_y_end = min(y + sampling_step, height)
+                block_x_end = min(x + sampling_step, width)
+                for yy in range(y, block_y_end):
+                    row = frame[yy]
+                    for xx in range(x, block_x_end):
+                        row[xx] = (char, color_code)
 
         if hud:
             self._blit_hud(frame, hud, hud_color)
