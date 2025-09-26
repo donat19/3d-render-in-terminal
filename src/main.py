@@ -6,9 +6,9 @@ import argparse
 import math
 import sys
 import time
-from typing import Callable
+from typing import Callable, Optional, cast
 
-from .renderer.engine import Mesh, RenderEngine, Vec3
+from .renderer.engine import FrameMatrix, Mesh, RenderEngine, Vec3
 from .renderer.objects import cornell_box_mesh, cube_mesh, floor_mesh
 from .renderer.terminal import TerminalController
 
@@ -83,6 +83,11 @@ def parse_arguments() -> argparse.Namespace:
         default=10,
         help="Number of checkerboard tiles per side",
     )
+    parser.add_argument(
+        "--gpu",
+        action="store_true",
+        help="Use experimental DRM/KMS presenter instead of ANSI output",
+    )
     return parser.parse_args()
 
 
@@ -116,7 +121,33 @@ def run() -> None:
         requested_light = (0.2, -1.0, -0.2)
     light = _ensure_light_vector(requested_light)
 
-    controller = TerminalController()
+    controller: Optional[TerminalController] = None
+    display_context = None
+    gpu_display = None
+    using_gpu = False
+    gpu_warning: Optional[str] = None
+
+    if args.gpu:
+        try:
+            from .renderer.drm import DrmDisplay
+
+            gpu_display = DrmDisplay()
+            if gpu_display.is_ready:
+                display_context = gpu_display
+                using_gpu = True
+            else:
+                gpu_warning = gpu_display.failure_reason or "GPU backend unavailable"
+        except Exception as exc:  # pragma: no cover - environment specific
+            gpu_warning = f"GPU backend initialisation failed: {exc}"
+
+    if display_context is None:
+        controller = TerminalController()
+        display_context = controller
+
+    if gpu_warning:
+        sys.stderr.write(f"[renderer] {gpu_warning}\n")
+        sys.stderr.flush()
+
     fps = max(1.0, args.fps)
     frame_duration = 1.0 / fps
     mesh = _mesh_factory(args.object, args.scale)
@@ -141,8 +172,8 @@ def run() -> None:
     if is_cornell and camera_distance < 6.0:
         camera_distance = 6.0
 
-    with controller:
-        width, height = controller.size_tuple()
+    with display_context as active_display:
+        width, height = active_display.size_tuple()
         engine = RenderEngine(
             width,
             height,
@@ -181,8 +212,9 @@ def run() -> None:
                     smoothed_fps = smoothed_fps * 0.85 + instantaneous_fps * 0.15
                 last_frame_start = frame_start
 
-                width, height = controller.size_tuple()
-                engine.resize(width, height)
+                if not using_gpu:
+                    width, height = active_display.size_tuple()
+                    engine.resize(width, height)
 
                 if rotation_velocity.length_squared() > 0.0:
                     rotation = Vec3(
@@ -191,7 +223,7 @@ def run() -> None:
                         rotation.z + rotation_velocity.z * delta,
                     )
 
-                if not is_cornell:
+                if not is_cornell and controller is not None:
                     for key in controller.poll_keys():
                         if key == "LEFT":
                             orbit_yaw += orbit_step
@@ -220,19 +252,42 @@ def run() -> None:
 
                 shadow_rays = cast_shadows or is_cornell
 
-                frame = engine.render(
-                    mesh,
-                    combined_rotation,
-                    translation=object_translation,
-                    floor=floor,
-                    floor_rotation=orbit_rotation if (floor is not None and not is_cornell) else floor_rotation,
-                    floor_translation=floor_translation,
-                    cast_shadows=shadow_rays,
-                    enable_reflections=enable_reflections,
-                    hud=hud_lines,
-                    hud_color=252,
-                )
-                controller.draw(frame)
+                if using_gpu and gpu_display is not None:
+                    frame_matrix = cast(
+                        FrameMatrix,
+                        engine.render(
+                            mesh,
+                            combined_rotation,
+                            translation=object_translation,
+                            floor=floor,
+                            floor_rotation=orbit_rotation if (floor is not None and not is_cornell) else floor_rotation,
+                            floor_translation=floor_translation,
+                            cast_shadows=shadow_rays,
+                            enable_reflections=enable_reflections,
+                            hud=hud_lines,
+                            hud_color=252,
+                            output_format="matrix",
+                        ),
+                    )
+                    gpu_display.draw_matrix(frame_matrix)
+                else:
+                    frame_str = cast(
+                        str,
+                        engine.render(
+                            mesh,
+                            combined_rotation,
+                            translation=object_translation,
+                            floor=floor,
+                            floor_rotation=orbit_rotation if (floor is not None and not is_cornell) else floor_rotation,
+                            floor_translation=floor_translation,
+                            cast_shadows=shadow_rays,
+                            enable_reflections=enable_reflections,
+                            hud=hud_lines,
+                            hud_color=252,
+                        ),
+                    )
+                    terminal = cast(TerminalController, active_display)
+                    terminal.draw(frame_str)
 
                 frame_counter += 1
                 if args.frames and frame_counter >= args.frames:
@@ -243,7 +298,8 @@ def run() -> None:
                 if sleep_time > 0:
                     time.sleep(sleep_time)
         except KeyboardInterrupt:
-            controller.restore()
+            if controller is not None:
+                controller.restore()
             sys.stdout.write("\nInterrupted. Bye!\n")
             sys.stdout.flush()
 

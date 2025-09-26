@@ -4,7 +4,7 @@ from __future__ import annotations
 
 import math
 from dataclasses import dataclass
-from typing import List, Optional, Sequence, Tuple
+from typing import List, Optional, Sequence, Tuple, Union
 
 
 @dataclass(frozen=True, slots=True)
@@ -110,6 +110,10 @@ class TraceResult:
     rgb: Tuple[float, float, float]
 
 
+FrameCell = Tuple[str, Optional[int]]
+FrameMatrix = List[List[FrameCell]]
+
+
 class RenderEngine:
     """Software renderer producing ANSI-coloured frames for terminal output."""
 
@@ -166,7 +170,8 @@ class RenderEngine:
         enable_reflections: bool = True,
         hud: Optional[Sequence[str]] = None,
         hud_color: Optional[int] = 250,
-    ) -> str:
+        output_format: str = "ansi",
+    ) -> Union[str, FrameMatrix]:
         if self.width < 10 or self.height < 10:
             return (
                 "Terminal window too small for rendering. "
@@ -222,7 +227,11 @@ class RenderEngine:
         if hud:
             self._blit_hud(frame, hud, hud_color)
 
-        return self._compose_frame(frame)
+        if output_format == "matrix":
+            return frame
+        if output_format == "ansi":
+            return self._compose_frame(frame)
+        raise ValueError(f"Unsupported output_format '{output_format}'")
 
     # Internal helpers -------------------------------------------------
 

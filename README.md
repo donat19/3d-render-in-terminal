@@ -60,8 +60,19 @@ Available flags:
 | `--no-reflections` | Disable reflective floor rendering | `false` |
 | `--floor-size` | Edge length of the floor plane (world units) | `12.0` |
 | `--floor-tiles` | Checkerboard tiles per side (higher = finer detail) | `10` |
+| `--gpu` | Experimental DRM/KMS output (requires root + libdrm, falls back if unavailable) | disabled |
 
 Feel free to resize the terminal while the renderer is running; the engine automatically adapts to the new resolution.
+
+### Experimental GPU output (DRM/KMS)
+
+If your machine exposes a `/dev/dri/card*` node and you have `libdrm` installed, you can request the experimental direct-to-GPU presenter:
+
+```bash
+.venv/bin/terminal-renderer --object cornell --gpu
+```
+
+This path tries to set the process as the DRM master, creates a dumb buffer, and scans it out through the primary CRTC. The renderer renders into a matrix instead of ANSI strings, which removes most of the terminal overhead. The feature currently requires root (or appropriate udev rules) and only targets simple XRGB8888 framebuffers; if initialisation fails the program falls back to the regular terminal output and prints a warning.
 
 ## Tests
 
