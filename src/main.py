@@ -590,7 +590,7 @@ async def _run_async_loop(args: argparse.Namespace, config: RuntimeConfig) -> No
                     sleep_time = config.frame_duration - frame_time
                     if sleep_time > 0:
                         await asyncio.sleep(sleep_time)
-    except KeyboardInterrupt:  # pragma: no cover - interactive loop
+    except (KeyboardInterrupt, asyncio.CancelledError):  # pragma: no cover - interactive loop
         if controller is not None:
             controller.restore()
         sys.stdout.write("\nInterrupted. Bye!\n")
