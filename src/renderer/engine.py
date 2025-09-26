@@ -87,7 +87,7 @@ class Mesh:
 class RenderEngine:
     """Software renderer producing ANSI-coloured frames for terminal output."""
 
-    _GRADIENT = " .'`^\",:;Il!i><~+_-?][}{1)(|\\/tfjrxnuvczXYUJCLQ0OZmwqpdbkhao*#MW&8%B@$"
+    _GRADIENT = "  ..,,--''\"\"^^::;;!!++==??**##%%@@▓█"
 
     def __init__(
         self,
@@ -405,13 +405,13 @@ class RenderEngine:
                 frame[y][x] = (char, color)
 
     def _compute_intensity(self, normal: Vec3, to_camera: Vec3) -> float:
-        ambient = 0.12
+        ambient = 0.18
         diffuse = max(0.0, normal.dot(self.light_direction))
         halfway = (self.light_direction + to_camera).normalized()
         specular = 0.0
         if halfway.length_squared() > 1e-8:
-            specular = max(0.0, normal.dot(halfway)) ** 32
-        intensity = ambient + 0.85 * diffuse + 0.35 * specular
+            specular = max(0.0, normal.dot(halfway)) ** 24
+        intensity = ambient + 0.72 * diffuse + 0.28 * specular
         return max(0.0, min(1.0, intensity))
 
     def _project_shadow(
@@ -433,6 +433,7 @@ class RenderEngine:
         return projected
 
     def _char_for_intensity(self, intensity: float) -> str:
+        intensity = max(0.0, min(1.0, intensity)) ** 0.8
         idx = int(max(0, min(len(self._GRADIENT) - 1, round(intensity * (len(self._GRADIENT) - 1)))))
         return self._GRADIENT[idx]
 
@@ -442,9 +443,16 @@ class RenderEngine:
         r, g, b = base_color
         def clamp(value: float) -> int:
             return int(max(0, min(5, round(value))))
-        scaled_r = clamp(r * intensity)
-        scaled_g = clamp(g * intensity)
-        scaled_b = clamp(b * intensity)
+        intensity = max(0.0, min(1.0, intensity))
+
+        def mix_channel(channel: int) -> int:
+            base = (channel / 5.0) * (0.45 + 0.55 * intensity)
+            highlight = (intensity ** 1.4) * 0.4
+            return clamp((base + highlight) * 5.0)
+
+        scaled_r = mix_channel(r)
+        scaled_g = mix_channel(g)
+        scaled_b = mix_channel(b)
         return 16 + 36 * scaled_r + 6 * scaled_g + scaled_b
 
     def _compose_frame(

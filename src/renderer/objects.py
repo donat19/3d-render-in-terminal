@@ -61,7 +61,7 @@ def floor_mesh(
     size: float = 12.0,
     *,
     tiles: int = 10,
-    colours: Tuple[Tuple[int, int, int], Tuple[int, int, int]] = ((3, 3, 3), (2, 2, 2)),
+    colours: Tuple[Tuple[int, int, int], Tuple[int, int, int]] = ((4, 4, 4), (2, 2, 3)),
 ) -> Mesh:
     """Return a checkerboard floor composed of triangles on the XZ plane."""
 
