@@ -2,7 +2,9 @@
 
 from __future__ import annotations
 
+import asyncio
 import math
+from concurrent.futures import ThreadPoolExecutor
 from dataclasses import dataclass
 from typing import List, Optional, Sequence, Tuple, Union
 
@@ -174,6 +176,7 @@ class RenderEngine:
         self._horizon_haze_strength = 0.5
         self._ray_cache = None
         self._ray_cache_key = None
+        self._async_chunk_rows = 16
 
     def resize(self, width: int, height: int) -> None:
         if width < 2 or height < 2:
@@ -219,6 +222,133 @@ class RenderEngine:
                 "Resize to at least 10x10 characters.\n"
             )
 
+        frame, scene_triangles, camera_origin, max_depth = self._prepare_render_inputs(
+            mesh,
+            rotation,
+            translation,
+            floor,
+            floor_rotation,
+            floor_translation,
+            enable_reflections,
+        )
+
+        ray_cache = self._ensure_ray_cache()
+        _, chunk_rows = self._compute_chunk(
+            self.width,
+            scene_triangles,
+            ray_cache,
+            camera_origin,
+            max_depth,
+            cast_shadows,
+            0,
+            self.height,
+        )
+        for row_index, row in enumerate(chunk_rows):
+            frame[row_index] = row
+
+        if hud:
+            self._blit_hud(frame, hud, hud_color)
+
+        if output_format == "matrix":
+            return frame
+        if output_format == "ansi":
+            return self._compose_frame(frame)
+        raise ValueError(f"Unsupported output_format '{output_format}'")
+
+    async def render_async(
+        self,
+        mesh: Mesh,
+        rotation: Vec3,
+        translation: Vec3 | None = None,
+        *,
+        floor: Mesh | None = None,
+        floor_rotation: Vec3 | None = None,
+        floor_translation: Vec3 | None = None,
+        cast_shadows: bool = False,
+        enable_reflections: bool = True,
+        hud: Optional[Sequence[str]] = None,
+        hud_color: Optional[int] = 250,
+        output_format: str = "ansi",
+        executor: ThreadPoolExecutor | None = None,
+        chunk_rows: int | None = None,
+    ) -> Union[str, FrameMatrix]:
+        if self.width < 10 or self.height < 10:
+            return (
+                "Terminal window too small for rendering. "
+                "Resize to at least 10x10 characters.\n"
+            )
+
+        frame, scene_triangles, camera_origin, max_depth = self._prepare_render_inputs(
+            mesh,
+            rotation,
+            translation,
+            floor,
+            floor_rotation,
+            floor_translation,
+            enable_reflections,
+        )
+
+        ray_cache = self._ensure_ray_cache()
+        height = self.height
+        width = self.width
+        sampling_step = self._sampling_step
+        chunk_size = chunk_rows if chunk_rows is not None else self._async_chunk_rows
+        chunk_size = max(sampling_step, int(chunk_size))
+
+        loop = asyncio.get_running_loop()
+        local_executor = executor
+        created_executor = False
+        if local_executor is None:
+            local_executor = ThreadPoolExecutor(max_workers=4)
+            created_executor = True
+
+        try:
+            tasks = [
+                loop.run_in_executor(
+                    local_executor,
+                    self._compute_chunk,
+                    width,
+                    scene_triangles,
+                    ray_cache,
+                    camera_origin,
+                    max_depth,
+                    cast_shadows,
+                    y_start,
+                    min(height, y_start + chunk_size),
+                )
+                for y_start in range(0, height, chunk_size)
+            ]
+            results = await asyncio.gather(*tasks)
+        finally:
+            if created_executor and local_executor is not None:
+                local_executor.shutdown(wait=True)
+
+        results.sort(key=lambda item: item[0])
+        for y_start, chunk_rows_data in results:
+            for offset, row in enumerate(chunk_rows_data):
+                frame[y_start + offset] = row
+
+        if hud:
+            self._blit_hud(frame, hud, hud_color)
+
+        if output_format == "matrix":
+            return frame
+        if output_format == "ansi":
+            return self._compose_frame(frame)
+        raise ValueError(f"Unsupported output_format '{output_format}'")
+
+    # Internal helpers -------------------------------------------------
+
+    def _prepare_render_inputs(
+        self,
+        mesh: Mesh,
+        rotation: Vec3,
+        translation: Vec3 | None,
+        floor: Mesh | None,
+        floor_rotation: Vec3 | None,
+        floor_translation: Vec3 | None,
+        enable_reflections: bool,
+    ) -> Tuple[List[List[FrameCell]], List[SceneTriangle], Vec3, int]:
         if translation is None:
             translation = Vec3(0.0, 0.0, 0.0)
         if floor_rotation is None:
@@ -226,7 +356,7 @@ class RenderEngine:
         if floor_translation is None:
             floor_translation = Vec3(0.0, 0.0, 0.0)
 
-        frame: List[List[Tuple[str, Optional[int]]]] = [
+        frame: List[List[FrameCell]] = [
             [(" ", None) for _ in range(self.width)] for _ in range(self.height)
         ]
 
@@ -242,55 +372,7 @@ class RenderEngine:
 
         camera_origin = Vec3(0.0, 0.0, 0.0)
         max_depth = self._max_reflection_depth if enable_reflections else 1
-
-        ray_cache = self._ensure_ray_cache()
-        trace_ray = self._trace_ray
-        luminance_fn = self._luminance
-        char_for_intensity = self._char_for_intensity
-        ansi_from_rgb = self._ansi_from_rgb
-
-        sampling_step = self._sampling_step
-        height = self.height
-        width = self.width
-
-        for y in range(0, height, sampling_step):
-            ray_row = ray_cache[y]
-            for x in range(0, width, sampling_step):
-                direction = ray_row[x]
-                traced = trace_ray(
-                    camera_origin,
-                    direction,
-                    scene_triangles,
-                    depth=0,
-                    max_depth=max_depth,
-                    cast_shadows=cast_shadows,
-                )
-                if traced is None:
-                    continue
-
-                luminance = luminance_fn(traced.rgb)
-                if luminance <= 0.02:
-                    continue
-
-                char = char_for_intensity(luminance)
-                color_code = ansi_from_rgb(traced.rgb)
-                block_y_end = min(y + sampling_step, height)
-                block_x_end = min(x + sampling_step, width)
-                for yy in range(y, block_y_end):
-                    row = frame[yy]
-                    for xx in range(x, block_x_end):
-                        row[xx] = (char, color_code)
-
-        if hud:
-            self._blit_hud(frame, hud, hud_color)
-
-        if output_format == "matrix":
-            return frame
-        if output_format == "ansi":
-            return self._compose_frame(frame)
-        raise ValueError(f"Unsupported output_format '{output_format}'")
-
-    # Internal helpers -------------------------------------------------
+        return frame, scene_triangles, camera_origin, max_depth
 
     def _build_scene_triangles(
         self,
@@ -403,6 +485,58 @@ class RenderEngine:
         self._ray_cache = rays
         self._ray_cache_key = key
         return rays
+
+    def _compute_chunk(
+        self,
+        frame_width: int,
+        scene_triangles: Sequence[SceneTriangle],
+        ray_cache: Sequence[Sequence[Vec3]],
+        camera_origin: Vec3,
+        max_depth: int,
+        cast_shadows: bool,
+        y_start: int,
+        y_end: int,
+    ) -> Tuple[int, List[List[FrameCell]]]:
+        sampling_step = self._sampling_step
+        luminance_fn = self._luminance
+        char_for_intensity = self._char_for_intensity
+        ansi_from_rgb = self._ansi_from_rgb
+        trace_ray = self._trace_ray
+
+        chunk_height = max(0, y_end - y_start)
+        chunk_frame: List[List[FrameCell]] = [
+            [(" ", None) for _ in range(frame_width)] for _ in range(chunk_height)
+        ]
+
+        for y in range(y_start, y_end, sampling_step):
+            ray_row = ray_cache[y]
+            for x in range(0, frame_width, sampling_step):
+                direction = ray_row[x]
+                traced = trace_ray(
+                    camera_origin,
+                    direction,
+                    scene_triangles,
+                    depth=0,
+                    max_depth=max_depth,
+                    cast_shadows=cast_shadows,
+                )
+                if traced is None:
+                    continue
+
+                luminance = luminance_fn(traced.rgb)
+                if luminance <= 0.02:
+                    continue
+
+                char = char_for_intensity(luminance)
+                color_code = ansi_from_rgb(traced.rgb)
+                block_y_end = min(y_end, y + sampling_step)
+                block_x_end = min(frame_width, x + sampling_step)
+                for yy in range(y, block_y_end):
+                    local_row = chunk_frame[yy - y_start]
+                    for xx in range(x, block_x_end):
+                        local_row[xx] = (char, color_code)
+
+        return y_start, chunk_frame
 
     def _environment_color(self, direction: Vec3) -> Tuple[float, float, float]:
         y = max(-1.0, min(1.0, direction.y))

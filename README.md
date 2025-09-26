@@ -61,6 +61,7 @@ Available flags:
 | `--floor-size` | Edge length of the floor plane (world units) | `12.0` |
 | `--floor-tiles` | Checkerboard tiles per side (higher = finer detail) | `10` |
 | `--gpu` | Experimental DRM/KMS output (requires root + libdrm, falls back if unavailable) | disabled |
+| `--async` | Enable asynchronous frame computation (best on multi-core ARM) | disabled |
 | `--pixel-step` | Render every Nth pixel and fill the gaps (higher = faster, lower detail) | `1` |
 | `--reflection-depth` | Maximum recursive reflection depth | `2` |
 | `--ambient` | Ambient light strength | `0.22` |
@@ -82,6 +83,10 @@ This path tries to set the process as the DRM master, creates a dumb buffer, and
 When GPU mode is enabled without explicit quality flags, the renderer automatically bumps `--pixel-step` to `2` and caps `--reflection-depth` to `1` to keep frame times manageable on low-power hardware. You can still override either value manually.
 
 The sky gradient, sun bloom, and fake global illumination can be tuned via `--sun-intensity`, `--ambient`, and `--gi-strength`. Lower these values for a flatter look, or raise them for brighter outdoor lighting.
+
+### Asynchronous rendering on ARM
+
+Pass `--async` to spread ray-tracing work across a thread pool orchestrated by `asyncio`. On ARM SoCs the renderer automatically scales the worker count based on available cores and batches rows in configurable chunks (default derived from `--pixel-step`). The flag works with both the ANSI and `--gpu` presenters; if you combine it with higher `--pixel-step` values you can quickly approach the 10 FPS target on low-power devices.
 
 ## Tests
 
