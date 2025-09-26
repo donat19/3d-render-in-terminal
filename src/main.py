@@ -216,6 +216,8 @@ def run() -> None:
                 if not is_cornell:
                     hud_lines = hud_lines + ("Arrow keys: orbit camera",)
 
+                shadow_rays = cast_shadows or is_cornell
+
                 frame = engine.render(
                     mesh,
                     combined_rotation,
@@ -223,7 +225,7 @@ def run() -> None:
                     floor=floor,
                     floor_rotation=orbit_rotation if (floor is not None and not is_cornell) else floor_rotation,
                     floor_translation=floor_translation,
-                    cast_shadows=cast_shadows,
+                    cast_shadows=shadow_rays,
                     enable_reflections=enable_reflections,
                     hud=hud_lines,
                     hud_color=252,

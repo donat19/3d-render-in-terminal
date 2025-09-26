@@ -37,7 +37,18 @@ class ProjectionTests(unittest.TestCase):
         engine = RenderEngine(120, 60, fov_degrees=70.0, camera_distance=6.0)
         cube = cube_mesh(2.0)
         floor = floor_mesh(size=10.0, tiles=6)
-        frame = engine.render(
+        frame_without_shadows = engine.render(
+            cube,
+            rotation=Vec3(0.3, 0.9, 0.1),
+            translation=Vec3(0.0, 0.0, 0.0),
+            floor=floor,
+            floor_rotation=Vec3(0.0, 0.0, 0.0),
+            floor_translation=Vec3(0.0, -2.0, 0.0),
+            cast_shadows=False,
+            enable_reflections=False,
+        )
+
+        frame_with_shadows = engine.render(
             cube,
             rotation=Vec3(0.3, 0.9, 0.1),
             translation=Vec3(0.0, 0.0, 0.0),
@@ -45,8 +56,10 @@ class ProjectionTests(unittest.TestCase):
             floor_rotation=Vec3(0.0, 0.0, 0.0),
             floor_translation=Vec3(0.0, -2.0, 0.0),
             cast_shadows=True,
+            enable_reflections=False,
         )
-        self.assertIn("▓", frame)
+
+        self.assertNotEqual(frame_without_shadows, frame_with_shadows)
 
     def test_hud_overlay_displays_text(self) -> None:
         engine = RenderEngine(60, 30, fov_degrees=70.0, camera_distance=6.0)

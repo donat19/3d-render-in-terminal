@@ -84,6 +84,32 @@ class Mesh:
         return iter(self._triangles)
 
 
+@dataclass(frozen=True)
+class SceneTriangle:
+    v0: Vec3
+    v1: Vec3
+    v2: Vec3
+    normal: Vec3
+    color: Tuple[int, int, int]
+    reflective: float
+    triangle_id: int
+
+
+@dataclass(frozen=True)
+class HitInfo:
+    distance: float
+    point: Vec3
+    normal: Vec3
+    color: Tuple[int, int, int]
+    reflective: float
+    triangle_id: int
+
+
+@dataclass(frozen=True)
+class TraceResult:
+    rgb: Tuple[float, float, float]
+
+
 class RenderEngine:
     """Software renderer producing ANSI-coloured frames for terminal output."""
 
@@ -105,11 +131,12 @@ class RenderEngine:
         self.height = height
         self._fov_degrees = fov_degrees
         self._fov_radians = math.radians(fov_degrees)
+        self._tan_half_fov = math.tan(self._fov_radians / 2.0)
         self.camera_distance = camera_distance
         self.light_direction = light_direction.normalized()
         self.near_clip = near_clip
         self._aspect_ratio = self.width / self.height
-        self._shadow_colour = self._color_for_intensity((1, 1, 1), 0.35)
+        self._max_reflection_depth = 2
 
     def resize(self, width: int, height: int) -> None:
         if width < 2 or height < 2:
@@ -121,6 +148,7 @@ class RenderEngine:
     def set_fov(self, fov_degrees: float) -> None:
         self._fov_degrees = fov_degrees
         self._fov_radians = math.radians(fov_degrees)
+        self._tan_half_fov = math.tan(self._fov_radians / 2.0)
 
     def project_point(self, vertex: Vec3) -> Optional[Tuple[float, float, float]]:
         return self._project(vertex)
@@ -152,218 +180,44 @@ class RenderEngine:
         if floor_translation is None:
             floor_translation = Vec3(0.0, 0.0, 0.0)
 
-        depth_buffer: List[List[float]] = [
-            [float("inf")] * self.width for _ in range(self.height)
-        ]
         frame: List[List[Tuple[str, Optional[int]]]] = [
             [(" ", None) for _ in range(self.width)] for _ in range(self.height)
         ]
 
-        floor_height: Optional[float] = None
+        scene_triangles = self._build_scene_triangles(
+            mesh,
+            rotation,
+            translation,
+            floor,
+            floor_rotation,
+            floor_translation,
+            enable_reflections,
+        )
 
-        if floor is not None:
-            floor_height = floor_translation.y
-            for triangle in floor:
-                transformed_floor = [
-                    self._transform_vertex(vertex, floor_rotation, floor_translation)
-                    for vertex in triangle.vertices
-                ]
+        camera_origin = Vec3(0.0, 0.0, 0.0)
+        max_depth = self._max_reflection_depth if enable_reflections else 1
 
-                if any(vertex.z <= self.near_clip for vertex in transformed_floor):
-                    continue
-
-                normal = (transformed_floor[1] - transformed_floor[0]).cross(
-                    transformed_floor[2] - transformed_floor[0]
+        for y in range(self.height):
+            for x in range(self.width):
+                direction = self._generate_camera_ray(x, y)
+                traced = self._trace_ray(
+                    camera_origin,
+                    direction,
+                    scene_triangles,
+                    depth=0,
+                    max_depth=max_depth,
+                    cast_shadows=cast_shadows,
                 )
-                if normal.length_squared() <= 1e-8:
-                    continue
-                normal = normal.normalized()
-
-                centroid = (
-                    transformed_floor[0]
-                    + transformed_floor[1]
-                    + transformed_floor[2]
-                ) * (1.0 / 3.0)
-                to_camera = (-centroid).normalized()
-                if normal.dot(to_camera) <= 0:
+                if traced is None:
                     continue
 
-                illumination = self._compute_intensity(normal, to_camera)
-
-                projected_floor: List[Tuple[float, float, float]] = []
-                skip_triangle = False
-                for vertex in transformed_floor:
-                    projected_vertex = self._project(vertex)
-                    if projected_vertex is None:
-                        skip_triangle = True
-                        break
-                    projected_floor.append(projected_vertex)
-
-                if skip_triangle:
+                luminance = self._luminance(traced.rgb)
+                if luminance <= 0.02:
                     continue
 
-                self._rasterize_triangle(
-                    projected_floor,
-                    transformed_floor,
-                    triangle.base_color,
-                    illumination,
-                    frame,
-                    depth_buffer,
-                )
-
-        object_drawables: List[
-            Tuple[List[Tuple[float, float, float]], Sequence[Vec3], Tuple[int, int, int], float]
-        ] = []
-        shadow_drawables: List[
-            Tuple[List[Tuple[float, float, float]], Sequence[Vec3]]
-        ] = []
-        reflection_drawables: List[
-            Tuple[List[Tuple[float, float, float]], Sequence[Vec3], Tuple[int, int, int], float]
-        ] = []
-
-        for triangle in mesh:
-            transformed = [
-                self._transform_vertex(vertex, rotation, translation)
-                for vertex in triangle.vertices
-            ]
-
-            if any(vertex.z <= self.near_clip for vertex in transformed):
-                continue
-
-            normal = (transformed[1] - transformed[0]).cross(
-                transformed[2] - transformed[0]
-            )
-            if normal.length_squared() <= 1e-8:
-                continue
-            normal = normal.normalized()
-
-            centroid = (
-                transformed[0] + transformed[1] + transformed[2]
-            ) * (1.0 / 3.0)
-            to_camera = (-centroid).normalized()
-            if normal.dot(to_camera) <= 0:
-                continue
-
-            illumination = self._compute_intensity(normal, to_camera)
-
-            projected: List[Tuple[float, float, float]] = []
-            skip_triangle = False
-            for vertex in transformed:
-                projected_vertex = self._project(vertex)
-                if projected_vertex is None:
-                    skip_triangle = True
-                    break
-                projected.append(projected_vertex)
-
-            if skip_triangle:
-                continue
-
-            object_drawables.append((projected, transformed, triangle.base_color, illumination))
-
-            if (
-                cast_shadows
-                and floor is not None
-                and floor_height is not None
-                and self.light_direction.y > 1e-4
-            ):
-                shadow_vertices = self._project_shadow(transformed, floor_height)
-                if shadow_vertices is None:
-                    continue
-
-                projected_shadow: List[Tuple[float, float, float]] = []
-                skip_shadow = False
-                for vertex in shadow_vertices:
-                    projected_vertex = self._project(vertex)
-                    if projected_vertex is None:
-                        skip_shadow = True
-                        break
-                    projected_shadow.append(projected_vertex)
-
-                if skip_shadow:
-                    continue
-
-                shadow_drawables.append((projected_shadow, shadow_vertices))
-
-            if (
-                enable_reflections
-                and floor is not None
-                and floor_height is not None
-            ):
-                reflection = self._reflect_vertices(transformed, floor_height)
-                if reflection is None:
-                    continue
-
-                reflection_projected: List[Tuple[float, float, float]] = []
-                skip_reflection = False
-                for vertex in reflection:
-                    projected_vertex = self._project(vertex)
-                    if projected_vertex is None:
-                        skip_reflection = True
-                        break
-                    reflection_projected.append(projected_vertex)
-
-                if skip_reflection:
-                    continue
-
-                normal_reflection = (reflection[1] - reflection[0]).cross(
-                    reflection[2] - reflection[0]
-                )
-                if normal_reflection.length_squared() <= 1e-8:
-                    continue
-                normal_reflection = normal_reflection.normalized()
-
-                centroid_reflection = (
-                    reflection[0] + reflection[1] + reflection[2]
-                ) * (1.0 / 3.0)
-                to_camera_reflection = (-centroid_reflection).normalized()
-                if normal_reflection.dot(to_camera_reflection) <= 0:
-                    continue
-
-                reflection_intensity = self._compute_intensity(
-                    normal_reflection, to_camera_reflection
-                )
-                reflection_drawables.append(
-                    (
-                        reflection_projected,
-                        reflection,
-                        triangle.base_color,
-                        reflection_intensity * 0.55,
-                    )
-                )
-
-        for projected_shadow, shadow_vertices in shadow_drawables:
-            self._rasterize_triangle(
-                projected_shadow,
-                shadow_vertices,
-                (0, 0, 0),
-                0.0,
-                frame,
-                depth_buffer,
-                depth_bias=-1e-2,
-                char_override="▓",
-                color_override=self._shadow_colour,
-            )
-
-        for projected_reflection, reflection_vertices, colour, illumination in reflection_drawables:
-            self._rasterize_triangle(
-                projected_reflection,
-                reflection_vertices,
-                colour,
-                illumination,
-                frame,
-                depth_buffer,
-                depth_bias=-5e-3,
-            )
-
-        for projected, transformed, colour, illumination in object_drawables:
-            self._rasterize_triangle(
-                projected,
-                transformed,
-                colour,
-                illumination,
-                frame,
-                depth_buffer,
-            )
+                char = self._char_for_intensity(luminance)
+                color_code = self._ansi_from_rgb(traced.rgb)
+                frame[y][x] = (char, color_code)
 
         if hud:
             self._blit_hud(frame, hud, hud_color)
@@ -371,6 +225,57 @@ class RenderEngine:
         return self._compose_frame(frame)
 
     # Internal helpers -------------------------------------------------
+
+    def _build_scene_triangles(
+        self,
+        mesh: Mesh,
+        rotation: Vec3,
+        translation: Vec3,
+        floor: Mesh | None,
+        floor_rotation: Vec3,
+        floor_translation: Vec3,
+        enable_reflections: bool,
+    ) -> List[SceneTriangle]:
+        scene: List[SceneTriangle] = []
+        triangle_id = 0
+
+        def add_mesh(source: Mesh, rot: Vec3, trans: Vec3, reflective: float) -> None:
+            nonlocal triangle_id
+            for triangle in source:
+                transformed = [
+                    self._transform_vertex(vertex, rot, trans)
+                    for vertex in triangle.vertices
+                ]
+
+                if any(vertex.z <= self.near_clip for vertex in transformed):
+                    continue
+
+                normal = (transformed[1] - transformed[0]).cross(
+                    transformed[2] - transformed[0]
+                )
+                if normal.length_squared() <= 1e-8:
+                    continue
+                normal = normal.normalized()
+
+                scene.append(
+                    SceneTriangle(
+                        transformed[0],
+                        transformed[1],
+                        transformed[2],
+                        normal,
+                        triangle.base_color,
+                        reflective,
+                        triangle_id,
+                    )
+                )
+                triangle_id += 1
+
+        add_mesh(mesh, rotation, translation, reflective=0.0)
+        if floor is not None:
+            reflectivity = 0.55 if enable_reflections else 0.0
+            add_mesh(floor, floor_rotation, floor_translation, reflective=reflectivity)
+
+        return scene
 
     def _transform_vertex(
         self, vertex: Vec3, rotation: Vec3, translation: Vec3
@@ -397,6 +302,20 @@ class RenderEngine:
         y = rotated_y.x * sin_rz + rotated_y.y * cos_rz
         return Vec3(x, y, rotated_y.z)
 
+    def _generate_camera_ray(self, pixel_x: int, pixel_y: int) -> Vec3:
+        if self.width <= 0 or self.height <= 0:
+            return Vec3(0.0, 0.0, 1.0)
+
+        ndc_x = ((pixel_x + 0.5) / self.width) * 2.0 - 1.0
+        ndc_y = 1.0 - ((pixel_y + 0.5) / self.height) * 2.0
+
+        px = ndc_x * self._aspect_ratio * self._tan_half_fov
+        py = ndc_y * self._tan_half_fov
+        direction = Vec3(px, py, 1.0).normalized()
+        if direction.length_squared() <= 1e-8:
+            return Vec3(0.0, 0.0, 1.0)
+        return direction
+
     def _project(self, vertex: Vec3) -> Optional[Tuple[float, float, float]]:
         if vertex.z <= self.near_clip:
             return None
@@ -409,112 +328,152 @@ class RenderEngine:
         y_screen = (1.0 - (y_ndc + 1.0) * 0.5) * (self.height - 1)
         return (x_screen, y_screen, vertex.z)
 
-    def _rasterize_triangle(
+    def _trace_ray(
         self,
-        projected: Sequence[Tuple[float, float, float]],
-        transformed: Sequence[Vec3],
-        base_color: Tuple[int, int, int],
-        illumination: float,
-        frame: List[List[Tuple[str, Optional[int]]]],
-        depth_buffer: List[List[float]],
+        origin: Vec3,
+        direction: Vec3,
+        triangles: Sequence[SceneTriangle],
         *,
-        depth_bias: float = 0.0,
-        char_override: Optional[str] = None,
-        color_override: Optional[int] = None,
-    ) -> None:
-        p0, p1, p2 = projected
-        x_coords = [p0[0], p1[0], p2[0]]
-        y_coords = [p0[1], p1[1], p2[1]]
+        depth: int,
+        max_depth: int,
+        cast_shadows: bool,
+    ) -> Optional[TraceResult]:
+        hit = self._closest_intersection(origin, direction, triangles)
+        if hit is None:
+            return None
 
-        min_x = max(0, int(math.floor(min(x_coords))))
-        max_x = min(self.width - 1, int(math.ceil(max(x_coords))))
-        min_y = max(0, int(math.floor(min(y_coords))))
-        max_y = min(self.height - 1, int(math.ceil(max(y_coords))))
+        normal = hit.normal
+        if normal.dot(direction) > 0:
+            normal = -normal
 
-        if min_x >= max_x or min_y >= max_y:
-            return
+        to_camera = (-direction).normalized()
+        in_shadow = cast_shadows and self._is_in_shadow(
+            hit.point, normal, triangles, hit.triangle_id
+        )
+        intensity = self._lighting_intensity(normal, to_camera, in_shadow)
 
-        def edge(ax: float, ay: float, bx: float, by: float, px: float, py: float) -> float:
-            return (px - ax) * (by - ay) - (py - ay) * (bx - ax)
+        base_rgb = (
+            (hit.color[0] / 5.0) * intensity,
+            (hit.color[1] / 5.0) * intensity,
+            (hit.color[2] / 5.0) * intensity,
+        )
 
-        area = edge(p0[0], p0[1], p1[0], p1[1], p2[0], p2[1])
-        if abs(area) <= 1e-8:
-            return
-
-        z_values = [p0[2], p1[2], p2[2]]
-
-        for y in range(min_y, max_y + 1):
-            for x in range(min_x, max_x + 1):
-                px = x + 0.5
-                py = y + 0.5
-                w0 = edge(p1[0], p1[1], p2[0], p2[1], px, py) / area
-                w1 = edge(p2[0], p2[1], p0[0], p0[1], px, py) / area
-                w2 = edge(p0[0], p0[1], p1[0], p1[1], px, py) / area
-
-                if w0 < -1e-4 or w1 < -1e-4 or w2 < -1e-4:
-                    continue
-
-                depth = (
-                    w0 * z_values[0]
-                    + w1 * z_values[1]
-                    + w2 * z_values[2]
-                    + depth_bias
+        if hit.reflective > 1e-3 and depth + 1 < max_depth:
+            reflection_origin = hit.point + normal * 1e-3
+            reflection_direction = self._reflect(direction, normal).normalized()
+            reflection = self._trace_ray(
+                reflection_origin,
+                reflection_direction,
+                triangles,
+                depth=depth + 1,
+                max_depth=max_depth,
+                cast_shadows=cast_shadows,
+            )
+            if reflection is not None:
+                blend = hit.reflective
+                base_rgb = (
+                    (1.0 - blend) * base_rgb[0] + blend * reflection.rgb[0],
+                    (1.0 - blend) * base_rgb[1] + blend * reflection.rgb[1],
+                    (1.0 - blend) * base_rgb[2] + blend * reflection.rgb[2],
                 )
-                if depth >= depth_buffer[y][x]:
-                    continue
 
-                depth_buffer[y][x] = depth
-                char = char_override or self._char_for_intensity(illumination)
-                if color_override is not None:
-                    color = color_override
-                else:
-                    color = self._color_for_intensity(base_color, illumination)
-                frame[y][x] = (char, color)
+        return TraceResult(self._clamp_rgb(base_rgb))
 
-    def _compute_intensity(self, normal: Vec3, to_camera: Vec3) -> float:
+    def _closest_intersection(
+        self,
+        origin: Vec3,
+        direction: Vec3,
+        triangles: Sequence[SceneTriangle],
+        exclude_id: Optional[int] = None,
+    ) -> Optional[HitInfo]:
+        closest_distance = float("inf")
+        closest_hit: Optional[HitInfo] = None
+
+        for triangle in triangles:
+            if exclude_id is not None and triangle.triangle_id == exclude_id:
+                continue
+
+            distance = self._intersect_triangle(origin, direction, triangle)
+            if distance is None or distance <= 1e-4 or distance >= closest_distance:
+                continue
+
+            point = origin + direction * distance
+            closest_distance = distance
+            closest_hit = HitInfo(
+                distance,
+                point,
+                triangle.normal,
+                triangle.color,
+                triangle.reflective,
+                triangle.triangle_id,
+            )
+
+        return closest_hit
+
+    def _intersect_triangle(
+        self, origin: Vec3, direction: Vec3, triangle: SceneTriangle
+    ) -> Optional[float]:
+        edge1 = triangle.v1 - triangle.v0
+        edge2 = triangle.v2 - triangle.v0
+        pvec = direction.cross(edge2)
+        det = edge1.dot(pvec)
+
+        if abs(det) <= 1e-8:
+            return None
+
+        inv_det = 1.0 / det
+        tvec = origin - triangle.v0
+        u = tvec.dot(pvec) * inv_det
+        if u < 0.0 or u > 1.0:
+            return None
+
+        qvec = tvec.cross(edge1)
+        v = direction.dot(qvec) * inv_det
+        if v < 0.0 or u + v > 1.0:
+            return None
+
+        distance = edge2.dot(qvec) * inv_det
+        if distance <= 1e-5:
+            return None
+
+        return distance
+
+    def _lighting_intensity(
+        self, normal: Vec3, to_camera: Vec3, in_shadow: bool
+    ) -> float:
         ambient = 0.18
+        if in_shadow:
+            return ambient
+
         diffuse = max(0.0, normal.dot(self.light_direction))
         halfway = (self.light_direction + to_camera).normalized()
         specular = 0.0
         if halfway.length_squared() > 1e-8:
             specular = max(0.0, normal.dot(halfway)) ** 24
+
         intensity = ambient + 0.72 * diffuse + 0.28 * specular
         return max(0.0, min(1.0, intensity))
 
-    def _project_shadow(
-        self, vertices: Sequence[Vec3], floor_height: float
-    ) -> Optional[List[Vec3]]:
-        if abs(self.light_direction.y) <= 1e-4:
-            return None
+    def _is_in_shadow(
+        self,
+        point: Vec3,
+        normal: Vec3,
+        triangles: Sequence[SceneTriangle],
+        triangle_id: int,
+    ) -> bool:
+        shadow_origin = point + normal * 1e-3
+        shadow_direction = -self.light_direction
+        hit = self._closest_intersection(
+            shadow_origin,
+            shadow_direction,
+            triangles,
+            exclude_id=triangle_id,
+        )
+        return hit is not None
 
-        projected: List[Vec3] = []
-        for vertex in vertices:
-            if vertex.y <= floor_height + 1e-4:
-                return None
-            t = (vertex.y - floor_height) / self.light_direction.y
-            if t <= 0:
-                return None
-            shadow_point = vertex - self.light_direction * t
-            projected.append(Vec3(shadow_point.x, floor_height + 1e-3, shadow_point.z))
-
-        return projected
-
-    def _reflect_vertices(
-        self, vertices: Sequence[Vec3], floor_height: float
-    ) -> Optional[List[Vec3]]:
-        reflected = []
-        for vertex in vertices:
-            mirrored_y = floor_height - (vertex.y - floor_height)
-            reflected_vertex = Vec3(vertex.x, mirrored_y + 1e-3, vertex.z)
-            if reflected_vertex.z <= self.near_clip:
-                return None
-            reflected.append(reflected_vertex)
-
-        if len(reflected) != 3:
-            return None
-
-        reflected[1], reflected[2] = reflected[2], reflected[1]
-        return reflected
+    @staticmethod
+    def _reflect(direction: Vec3, normal: Vec3) -> Vec3:
+        return direction - normal * (2.0 * direction.dot(normal))
 
     def _char_for_intensity(self, intensity: float) -> str:
         normalized = max(0.0, min(1.0, intensity)) ** 0.9
@@ -522,25 +481,23 @@ class RenderEngine:
         idx = max(0, min(len(self._GRADIENT) - 1, idx))
         return self._GRADIENT[idx]
 
-    def _color_for_intensity(
-        self, base_color: Tuple[int, int, int], intensity: float
-    ) -> int:
-        r, g, b = base_color
+    def _ansi_from_rgb(self, rgb: Tuple[float, float, float]) -> int:
+        r = int(max(0, min(5, round(rgb[0] * 5))))
+        g = int(max(0, min(5, round(rgb[1] * 5))))
+        b = int(max(0, min(5, round(rgb[2] * 5))))
+        return 16 + 36 * r + 6 * g + b
 
-        def clamp(value: float) -> int:
-            return int(max(0, min(5, round(value))))
+    @staticmethod
+    def _luminance(rgb: Tuple[float, float, float]) -> float:
+        return 0.2126 * rgb[0] + 0.7152 * rgb[1] + 0.0722 * rgb[2]
 
-        intensity = max(0.0, min(1.0, intensity))
-
-        def shade(channel: int) -> int:
-            base_norm = channel / 5.0
-            shaded = base_norm * (0.3 + 0.7 * intensity)
-            return clamp(shaded * 5.0)
-
-        scaled_r = shade(r)
-        scaled_g = shade(g)
-        scaled_b = shade(b)
-        return 16 + 36 * scaled_r + 6 * scaled_g + scaled_b
+    @staticmethod
+    def _clamp_rgb(rgb: Tuple[float, float, float]) -> Tuple[float, float, float]:
+        return (
+            max(0.0, min(1.0, rgb[0])),
+            max(0.0, min(1.0, rgb[1])),
+            max(0.0, min(1.0, rgb[2])),
+        )
 
     def _compose_frame(
         self, frame: Sequence[Sequence[Tuple[str, Optional[int]]]]
