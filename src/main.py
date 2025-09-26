@@ -168,16 +168,18 @@ def run() -> None:
         orbit_pitch_limit = math.radians(65.0)
 
         frame_counter = 0
-        last_time = time.perf_counter()
+        last_frame_start: float | None = None
         smoothed_fps = max(1.0, args.fps)
 
         try:
             while True:
-                now = time.perf_counter()
-                delta = now - last_time
-                last_time = now
-                instantaneous_fps = 1.0 / max(delta, 1e-6)
-                smoothed_fps = smoothed_fps * 0.85 + instantaneous_fps * 0.15
+                frame_start = time.perf_counter()
+                delta = 0.0
+                if last_frame_start is not None:
+                    delta = frame_start - last_frame_start
+                    instantaneous_fps = 1.0 / max(delta, 1e-6)
+                    smoothed_fps = smoothed_fps * 0.85 + instantaneous_fps * 0.15
+                last_frame_start = frame_start
 
                 width, height = controller.size_tuple()
                 engine.resize(width, height)
@@ -236,8 +238,8 @@ def run() -> None:
                 if args.frames and frame_counter >= args.frames:
                     break
 
-                elapsed = time.perf_counter() - now
-                sleep_time = frame_duration - elapsed
+                frame_time = time.perf_counter() - frame_start
+                sleep_time = frame_duration - frame_time
                 if sleep_time > 0:
                     time.sleep(sleep_time)
         except KeyboardInterrupt:
