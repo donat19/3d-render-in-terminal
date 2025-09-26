@@ -141,6 +141,8 @@ class RenderEngine:
         self.near_clip = near_clip
         self._aspect_ratio = self.width / self.height
         self._max_reflection_depth = 2
+        self._ray_cache = None
+        self._ray_cache_key = None
 
     def resize(self, width: int, height: int) -> None:
         if width < 2 or height < 2:
@@ -148,11 +150,13 @@ class RenderEngine:
         self.width = width
         self.height = height
         self._aspect_ratio = self.width / self.height
+        self._invalidate_ray_cache()
 
     def set_fov(self, fov_degrees: float) -> None:
         self._fov_degrees = fov_degrees
         self._fov_radians = math.radians(fov_degrees)
         self._tan_half_fov = math.tan(self._fov_radians / 2.0)
+        self._invalidate_ray_cache()
 
     def project_point(self, vertex: Vec3) -> Optional[Tuple[float, float, float]]:
         return self._project(vertex)
@@ -202,10 +206,18 @@ class RenderEngine:
         camera_origin = Vec3(0.0, 0.0, 0.0)
         max_depth = self._max_reflection_depth if enable_reflections else 1
 
+        ray_cache = self._ensure_ray_cache()
+        trace_ray = self._trace_ray
+        luminance_fn = self._luminance
+        char_for_intensity = self._char_for_intensity
+        ansi_from_rgb = self._ansi_from_rgb
+
         for y in range(self.height):
+            frame_row = frame[y]
+            ray_row = ray_cache[y]
             for x in range(self.width):
-                direction = self._generate_camera_ray(x, y)
-                traced = self._trace_ray(
+                direction = ray_row[x]
+                traced = trace_ray(
                     camera_origin,
                     direction,
                     scene_triangles,
@@ -216,13 +228,13 @@ class RenderEngine:
                 if traced is None:
                     continue
 
-                luminance = self._luminance(traced.rgb)
+                luminance = luminance_fn(traced.rgb)
                 if luminance <= 0.02:
                     continue
 
-                char = self._char_for_intensity(luminance)
-                color_code = self._ansi_from_rgb(traced.rgb)
-                frame[y][x] = (char, color_code)
+                char = char_for_intensity(luminance)
+                color_code = ansi_from_rgb(traced.rgb)
+                frame_row[x] = (char, color_code)
 
         if hud:
             self._blit_hud(frame, hud, hud_color)
@@ -321,6 +333,35 @@ class RenderEngine:
         py = ndc_y * self._tan_half_fov
         inv_len = 1.0 / math.sqrt(px * px + py * py + 1.0)
         return Vec3(px * inv_len, py * inv_len, inv_len)
+
+    def _ensure_ray_cache(self) -> List[List[Vec3]]:
+        key = (self.width, self.height, self._tan_half_fov)
+        if self._ray_cache is not None and self._ray_cache_key == key:
+            return self._ray_cache
+
+        width, height = self.width, self.height
+        rays: List[List[Vec3]] = []
+        aspect = self._aspect_ratio
+        tan_half_fov = self._tan_half_fov
+
+        for y in range(height):
+            row: List[Vec3] = []
+            ndc_y = 1.0 - ((y + 0.5) / height) * 2.0
+            py = ndc_y * tan_half_fov
+            for x in range(width):
+                ndc_x = ((x + 0.5) / width) * 2.0 - 1.0
+                px = ndc_x * aspect * tan_half_fov
+                inv_len = 1.0 / math.sqrt(px * px + py * py + 1.0)
+                row.append(Vec3(px * inv_len, py * inv_len, inv_len))
+            rays.append(row)
+
+        self._ray_cache = rays
+        self._ray_cache_key = key
+        return rays
+
+    def _invalidate_ray_cache(self) -> None:
+        self._ray_cache = None
+        self._ray_cache_key = None
 
     def _project(self, vertex: Vec3) -> Optional[Tuple[float, float, float]]:
         if vertex.z <= self.near_clip:
