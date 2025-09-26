@@ -360,29 +360,34 @@ class DrmDisplay:
             self._rows = rows
 
         buf = memoryview(mapping)
+        byte_buf = buf.cast("B")
         pitch = init.pitch
         width_px = init.width
         height_px = init.height
 
-        for row_idx, row in enumerate(frame):
-            base_y = row_idx * self._cell_height
-            for col_idx, (glyph, colour_idx) in enumerate(row):
-                intensity = glyph_intensity(glyph)
-                r, g, b = ansi256_to_rgb(colour_idx)
-                r = int(r * intensity)
-                g = int(g * intensity)
-                b = int(b * intensity)
-                self._fill_cell(
-                    buf,
-                    pitch,
-                    base_y,
-                    col_idx,
-                    r,
-                    g,
-                    b,
-                    width_px,
-                    height_px,
-                )
+        try:
+            for row_idx, row in enumerate(frame):
+                base_y = row_idx * self._cell_height
+                for col_idx, (glyph, colour_idx) in enumerate(row):
+                    intensity = glyph_intensity(glyph)
+                    r, g, b = ansi256_to_rgb(colour_idx)
+                    r = int(r * intensity)
+                    g = int(g * intensity)
+                    b = int(b * intensity)
+                    self._fill_cell(
+                        byte_buf,
+                        pitch,
+                        base_y,
+                        col_idx,
+                        r,
+                        g,
+                        b,
+                        width_px,
+                        height_px,
+                    )
+        finally:
+            byte_buf.release()
+            buf.release()
 
         # If terminal mirroring is enabled, also render ANSI output.
         if self._fallback is not None:
@@ -598,8 +603,7 @@ class DrmDisplay:
         mapping = mmap.mmap(
             fd,
             create_req.size,
-            mmap.PROT_READ | mmap.PROT_WRITE,
-            mmap.MAP_SHARED,
+            access=mmap.ACCESS_WRITE,
             offset=map_req.offset,
         )
         self._map = mapping
