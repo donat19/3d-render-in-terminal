@@ -87,7 +87,7 @@ class Mesh:
 class RenderEngine:
     """Software renderer producing ANSI-coloured frames for terminal output."""
 
-    _GRADIENT = "  ..,,--''\"\"^^::;;!!++==??**##%%@@▓█"
+    _GRADIENT = " ░▒▓█"
 
     def __init__(
         self,
@@ -517,26 +517,29 @@ class RenderEngine:
         return reflected
 
     def _char_for_intensity(self, intensity: float) -> str:
-        intensity = max(0.0, min(1.0, intensity)) ** 0.8
-        idx = int(max(0, min(len(self._GRADIENT) - 1, round(intensity * (len(self._GRADIENT) - 1)))))
+        normalized = max(0.0, min(1.0, intensity)) ** 0.9
+        idx = int(round(normalized * (len(self._GRADIENT) - 1)))
+        idx = max(0, min(len(self._GRADIENT) - 1, idx))
         return self._GRADIENT[idx]
 
     def _color_for_intensity(
         self, base_color: Tuple[int, int, int], intensity: float
     ) -> int:
         r, g, b = base_color
+
         def clamp(value: float) -> int:
             return int(max(0, min(5, round(value))))
+
         intensity = max(0.0, min(1.0, intensity))
 
-        def mix_channel(channel: int) -> int:
-            base = (channel / 5.0) * (0.45 + 0.55 * intensity)
-            highlight = (intensity ** 1.4) * 0.4
-            return clamp((base + highlight) * 5.0)
+        def shade(channel: int) -> int:
+            base_norm = channel / 5.0
+            shaded = base_norm * (0.3 + 0.7 * intensity)
+            return clamp(shaded * 5.0)
 
-        scaled_r = mix_channel(r)
-        scaled_g = mix_channel(g)
-        scaled_b = mix_channel(b)
+        scaled_r = shade(r)
+        scaled_g = shade(g)
+        scaled_b = shade(b)
         return 16 + 36 * scaled_r + 6 * scaled_g + scaled_b
 
     def _compose_frame(
