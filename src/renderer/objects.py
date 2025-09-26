@@ -2,7 +2,7 @@
 
 from __future__ import annotations
 
-from typing import List, Tuple
+from typing import List, Sequence, Tuple
 
 from .engine import Mesh, Triangle, Vec3
 
@@ -87,5 +87,128 @@ def floor_mesh(
 
             triangles.append(Triangle((v00, v01, v11), colour))
             triangles.append(Triangle((v00, v11, v10), colour))
+
+    return Mesh(triangles)
+
+
+def cornell_box_mesh() -> Mesh:
+    """Return a Cornell Box scene (walls, light, and two interior blocks)."""
+
+    triangles: List[Triangle] = []
+
+    def quad(v0: Vec3, v1: Vec3, v2: Vec3, v3: Vec3, colour: Tuple[int, int, int]) -> None:
+        triangles.append(Triangle((v0, v1, v2), colour))
+        triangles.append(Triangle((v0, v2, v3), colour))
+
+    floor_y = -2.0
+    ceiling_y = 2.0
+    left_x = -2.0
+    right_x = 2.0
+    back_z = 4.0
+    front_z = 0.0
+
+    white = (4, 4, 4)
+    red = (5, 1, 1)
+    green = (1, 5, 1)
+    light_colour = (5, 5, 3)
+    block_colour = (4, 4, 4)
+
+    # Floor
+    quad(
+        Vec3(left_x, floor_y, front_z),
+        Vec3(right_x, floor_y, front_z),
+        Vec3(right_x, floor_y, back_z),
+        Vec3(left_x, floor_y, back_z),
+        white,
+    )
+
+    # Ceiling
+    quad(
+        Vec3(left_x, ceiling_y, front_z),
+        Vec3(left_x, ceiling_y, back_z),
+        Vec3(right_x, ceiling_y, back_z),
+        Vec3(right_x, ceiling_y, front_z),
+        white,
+    )
+
+    # Back wall
+    quad(
+        Vec3(left_x, floor_y, back_z),
+        Vec3(right_x, floor_y, back_z),
+        Vec3(right_x, ceiling_y, back_z),
+        Vec3(left_x, ceiling_y, back_z),
+        white,
+    )
+
+    # Left wall (red)
+    quad(
+        Vec3(left_x, floor_y, front_z),
+        Vec3(left_x, floor_y, back_z),
+        Vec3(left_x, ceiling_y, back_z),
+        Vec3(left_x, ceiling_y, front_z),
+        red,
+    )
+
+    # Right wall (green)
+    quad(
+        Vec3(right_x, floor_y, back_z),
+        Vec3(right_x, floor_y, front_z),
+        Vec3(right_x, ceiling_y, front_z),
+        Vec3(right_x, ceiling_y, back_z),
+        green,
+    )
+
+    # Ceiling light patch
+    light_scale = 0.6
+    light_x0 = -light_scale
+    light_x1 = light_scale
+    light_z0 = 1.6
+    light_z1 = 2.6
+    quad(
+        Vec3(light_x0, ceiling_y - 1e-3, light_z0),
+        Vec3(light_x1, ceiling_y - 1e-3, light_z0),
+        Vec3(light_x1, ceiling_y - 1e-3, light_z1),
+        Vec3(light_x0, ceiling_y - 1e-3, light_z1),
+        light_colour,
+    )
+
+    def box(origin: Vec3, size: Vec3, colour: Tuple[int, int, int]) -> None:
+        ox, oy, oz = origin.x, origin.y, origin.z
+        sx, sy, sz = size.x, size.y, size.z
+        corners = {
+            "lbf": Vec3(ox, oy, oz),
+            "rbf": Vec3(ox + sx, oy, oz),
+            "rtf": Vec3(ox + sx, oy + sy, oz),
+            "ltf": Vec3(ox, oy + sy, oz),
+            "lbb": Vec3(ox, oy, oz + sz),
+            "rbb": Vec3(ox + sx, oy, oz + sz),
+            "rtb": Vec3(ox + sx, oy + sy, oz + sz),
+            "ltb": Vec3(ox, oy + sy, oz + sz),
+        }
+
+        faces: Sequence[Tuple[str, str, str, str]] = (
+            ("lbf", "rbf", "rtf", "ltf"),  # front
+            ("rbb", "lbb", "ltb", "rtb"),  # back
+            ("lbb", "lbf", "ltf", "ltb"),  # left
+            ("rbf", "rbb", "rtb", "rtf"),  # right
+            ("ltf", "rtf", "rtb", "ltb"),  # top
+            ("lbb", "rbb", "rbf", "lbf"),  # bottom
+        )
+        for v0, v1, v2, v3 in faces:
+            quad(corners[v0], corners[v1], corners[v2], corners[v3], colour)
+
+    # Short box (left side)
+    box(
+        origin=Vec3(-1.3, floor_y, 2.2),
+        size=Vec3(1.1, 1.4, 1.1),
+        colour=block_colour,
+    )
+
+    # Tall box (right side)
+    box(
+        origin=Vec3(0.4, floor_y, 1.1),
+        size=Vec3(1.0, 2.5, 1.0),
+        colour=block_colour,
+    )
 
     return Mesh(triangles)

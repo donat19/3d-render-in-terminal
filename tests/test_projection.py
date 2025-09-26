@@ -1,7 +1,7 @@
 import unittest
 
 from src.renderer.engine import RenderEngine, Vec3
-from src.renderer.objects import cube_mesh, floor_mesh
+from src.renderer.objects import cornell_box_mesh, cube_mesh, floor_mesh
 
 
 class ProjectionTests(unittest.TestCase):
@@ -59,6 +59,10 @@ class ProjectionTests(unittest.TestCase):
         )
         first_line = frame.splitlines()[0]
         self.assertIn("FPS 60.0", first_line)
+
+    def test_cornell_box_mesh_not_empty(self) -> None:
+        mesh = cornell_box_mesh()
+        self.assertGreater(len(mesh.triangles), 0)
 
 
 if __name__ == "__main__":

@@ -12,6 +12,7 @@ Colourful real-time 3D rendering directly inside your terminal. The project proj
 - Easily customisable rotation speed, FOV, light direction, and render duration.
 - Checkerboard ground plane with dynamic shadows, floor reflections, and enhanced lighting for depth cues.
 - Integrated HUD overlay (FPS counter in the top-right corner by default).
+- Includes a Cornell Box scene for lighting/material evaluation.
 
 ## Requirements
 
@@ -50,6 +51,7 @@ Available flags:
 | `--fov` | Field of view in degrees | `70` |
 | `--distance` | Camera distance from mesh centre | `5` |
 | `--light X Y Z` | Directional light vector | `-0.4 0.8 -0.6` |
+| `--object` | Scene to render (`cube`, `cornell`) | `cube` |
 | `--scale` | Uniform mesh scale multiplier | `2.0` |
 | `--speed` | Rotation speed multiplier | `1.0` |
 | `--frames` | Render a fixed number of frames before exiting | `0` (run forever) |
@@ -120,7 +122,7 @@ make package
 ## How it works
 
 - `src/renderer/engine.py` implements vector math, perspective projection, triangle rasterisation, a simple diffuse lighting model, and ANSI colour mapping.
-- `src/renderer/objects.py` contains ready-made meshes (currently a colourful cube) described via triangles.
+- `src/renderer/objects.py` contains ready-made meshes (colourful cube, Cornell box) described via triangles.
 - `src/renderer/terminal.py` hides cursor flicker, handles clearing, and streams frames to the terminal.
 - `src/main.py` glues everything together into a CLI-driven animation loop with adaptive frame timing.
 

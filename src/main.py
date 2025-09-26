@@ -8,7 +8,7 @@ import time
 from typing import Callable
 
 from .renderer.engine import Mesh, RenderEngine, Vec3
-from .renderer.objects import cube_mesh, floor_mesh
+from .renderer.objects import cornell_box_mesh, cube_mesh, floor_mesh
 from .renderer.terminal import TerminalController
 
 
@@ -34,7 +34,7 @@ def parse_arguments() -> argparse.Namespace:
         "--object",
         type=str,
         default="cube",
-        choices=["cube"],
+        choices=["cube", "cornell"],
         help="Which demo object to render",
     )
     parser.add_argument(
@@ -88,6 +88,7 @@ def parse_arguments() -> argparse.Namespace:
 def _mesh_factory(name: str, scale: float) -> Mesh:
     factories: dict[str, Callable[[float], Mesh]] = {
         "cube": cube_mesh,
+        "cornell": lambda _scale: cornell_box_mesh(),
     }
     try:
         factory = factories[name]
@@ -106,18 +107,38 @@ def _ensure_light_vector(vector: tuple[float, float, float]) -> Vec3:
 
 def run() -> None:
     args = parse_arguments()
-    light = _ensure_light_vector(tuple(args.light))
+    is_cornell = args.object == "cornell"
+
+    default_light = (-0.4, 0.8, -0.6)
+    requested_light = tuple(args.light)
+    if is_cornell and requested_light == default_light:
+        requested_light = (0.2, -1.0, -0.2)
+    light = _ensure_light_vector(requested_light)
 
     controller = TerminalController()
     fps = max(1.0, args.fps)
     frame_duration = 1.0 / fps
     mesh = _mesh_factory(args.object, args.scale)
-    floor = None if args.no_floor else floor_mesh(args.floor_size, tiles=max(1, args.floor_tiles))
+
+    floor = None
     floor_translation = Vec3(0.0, -0.5 * args.scale - 1.1, 0.0)
-    cast_shadows = floor is not None and not args.no_shadows
-    enable_reflections = floor is not None and not args.no_reflections
+    cast_shadows = False
+    enable_reflections = False
     object_translation = Vec3(0.0, 0.0, 0.0)
     floor_rotation = Vec3(0.0, 0.0, 0.0)
+
+    if not is_cornell:
+        floor = None if args.no_floor else floor_mesh(args.floor_size, tiles=max(1, args.floor_tiles))
+        cast_shadows = floor is not None and not args.no_shadows
+        enable_reflections = floor is not None and not args.no_reflections
+        object_translation = Vec3(0.0, 0.0, 0.0)
+    else:
+        # Push the box farther away so the camera peers into it, slightly raise to centre view.
+        object_translation = Vec3(0.0, -0.5, 0.5)
+
+    camera_distance = args.distance
+    if is_cornell and camera_distance < 7.0:
+        camera_distance = 7.0
 
     with controller:
         width, height = controller.size_tuple()
@@ -125,12 +146,15 @@ def run() -> None:
             width,
             height,
             fov_degrees=args.fov,
-            camera_distance=args.distance,
+            camera_distance=camera_distance,
             light_direction=light,
         )
 
         rotation = Vec3(0.0, 0.0, 0.0)
-        rotation_velocity = Vec3(0.9, 1.1, 0.6) * args.speed
+        if is_cornell:
+            rotation_velocity = Vec3(0.05, 0.1, 0.0) * args.speed
+        else:
+            rotation_velocity = Vec3(0.9, 1.1, 0.6) * args.speed
 
         frame_counter = 0
         last_time = time.perf_counter()
