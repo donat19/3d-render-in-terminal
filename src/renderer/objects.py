@@ -96,9 +96,21 @@ def cornell_box_mesh() -> Mesh:
 
     triangles: List[Triangle] = []
 
-    def quad(v0: Vec3, v1: Vec3, v2: Vec3, v3: Vec3, colour: Tuple[int, int, int]) -> None:
-        triangles.append(Triangle((v0, v1, v2), colour))
-        triangles.append(Triangle((v0, v2, v3), colour))
+    def quad(
+        v0: Vec3,
+        v1: Vec3,
+        v2: Vec3,
+        v3: Vec3,
+        colour: Tuple[int, int, int],
+        *,
+        inward: bool = False,
+    ) -> None:
+        if inward:
+            triangles.append(Triangle((v0, v3, v2), colour))
+            triangles.append(Triangle((v0, v2, v1), colour))
+        else:
+            triangles.append(Triangle((v0, v1, v2), colour))
+            triangles.append(Triangle((v0, v2, v3), colour))
 
     floor_y = -2.0
     ceiling_y = 2.0
@@ -115,20 +127,22 @@ def cornell_box_mesh() -> Mesh:
 
     # Floor
     quad(
-        Vec3(left_x, floor_y, front_z),
         Vec3(right_x, floor_y, front_z),
-        Vec3(right_x, floor_y, back_z),
+        Vec3(left_x, floor_y, front_z),
         Vec3(left_x, floor_y, back_z),
+        Vec3(right_x, floor_y, back_z),
         white,
+        inward=True,
     )
 
     # Ceiling
     quad(
-        Vec3(left_x, ceiling_y, front_z),
         Vec3(left_x, ceiling_y, back_z),
-        Vec3(right_x, ceiling_y, back_z),
+        Vec3(left_x, ceiling_y, front_z),
         Vec3(right_x, ceiling_y, front_z),
+        Vec3(right_x, ceiling_y, back_z),
         white,
+        inward=True,
     )
 
     # Back wall
@@ -138,24 +152,27 @@ def cornell_box_mesh() -> Mesh:
         Vec3(right_x, ceiling_y, back_z),
         Vec3(left_x, ceiling_y, back_z),
         white,
+        inward=True,
     )
 
     # Left wall (red)
     quad(
-        Vec3(left_x, floor_y, front_z),
         Vec3(left_x, floor_y, back_z),
-        Vec3(left_x, ceiling_y, back_z),
+        Vec3(left_x, floor_y, front_z),
         Vec3(left_x, ceiling_y, front_z),
+        Vec3(left_x, ceiling_y, back_z),
         red,
+        inward=True,
     )
 
     # Right wall (green)
     quad(
-        Vec3(right_x, floor_y, back_z),
         Vec3(right_x, floor_y, front_z),
-        Vec3(right_x, ceiling_y, front_z),
+        Vec3(right_x, floor_y, back_z),
         Vec3(right_x, ceiling_y, back_z),
+        Vec3(right_x, ceiling_y, front_z),
         green,
+        inward=True,
     )
 
     # Ceiling light patch
@@ -165,11 +182,12 @@ def cornell_box_mesh() -> Mesh:
     light_z0 = 1.6
     light_z1 = 2.6
     quad(
-        Vec3(light_x0, ceiling_y - 1e-3, light_z0),
         Vec3(light_x1, ceiling_y - 1e-3, light_z0),
-        Vec3(light_x1, ceiling_y - 1e-3, light_z1),
+        Vec3(light_x0, ceiling_y - 1e-3, light_z0),
         Vec3(light_x0, ceiling_y - 1e-3, light_z1),
+        Vec3(light_x1, ceiling_y - 1e-3, light_z1),
         light_colour,
+        inward=True,
     )
 
     def box(origin: Vec3, size: Vec3, colour: Tuple[int, int, int]) -> None:

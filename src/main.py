@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import argparse
+import math
 import sys
 import time
 from typing import Callable
@@ -133,12 +134,12 @@ def run() -> None:
         enable_reflections = floor is not None and not args.no_reflections
         object_translation = Vec3(0.0, 0.0, 0.0)
     else:
-        # Push the box farther away so the camera peers into it, slightly raise to centre view.
-        object_translation = Vec3(0.0, -0.5, 0.5)
+        # Position the Cornell box so the camera peers inside without rotation.
+        object_translation = Vec3(0.0, -0.25, -1.0)
 
     camera_distance = args.distance
-    if is_cornell and camera_distance < 7.0:
-        camera_distance = 7.0
+    if is_cornell and camera_distance < 6.0:
+        camera_distance = 6.0
 
     with controller:
         width, height = controller.size_tuple()
@@ -150,11 +151,21 @@ def run() -> None:
             light_direction=light,
         )
 
+        if is_cornell and args.fov == 70.0:
+            engine.set_fov(50.0)
+
         rotation = Vec3(0.0, 0.0, 0.0)
         if is_cornell:
-            rotation_velocity = Vec3(0.05, 0.1, 0.0) * args.speed
+            rotation = Vec3(0.1, 0.3, 0.0)
+        if is_cornell:
+            rotation_velocity = Vec3(0.0, 0.0, 0.0)
         else:
             rotation_velocity = Vec3(0.9, 1.1, 0.6) * args.speed
+
+        orbit_pitch = 0.0
+        orbit_yaw = 0.0
+        orbit_step = math.radians(3.0)
+        orbit_pitch_limit = math.radians(65.0)
 
         frame_counter = 0
         last_time = time.perf_counter()
@@ -171,20 +182,46 @@ def run() -> None:
                 width, height = controller.size_tuple()
                 engine.resize(width, height)
 
-                rotation = Vec3(
-                    rotation.x + rotation_velocity.x * delta,
-                    rotation.y + rotation_velocity.y * delta,
-                    rotation.z + rotation_velocity.z * delta,
+                if rotation_velocity.length_squared() > 0.0:
+                    rotation = Vec3(
+                        rotation.x + rotation_velocity.x * delta,
+                        rotation.y + rotation_velocity.y * delta,
+                        rotation.z + rotation_velocity.z * delta,
+                    )
+
+                if not is_cornell:
+                    for key in controller.poll_keys():
+                        if key == "LEFT":
+                            orbit_yaw += orbit_step
+                        elif key == "RIGHT":
+                            orbit_yaw -= orbit_step
+                        elif key == "UP":
+                            orbit_pitch = min(orbit_pitch + orbit_step, orbit_pitch_limit)
+                        elif key == "DOWN":
+                            orbit_pitch = max(orbit_pitch - orbit_step, -orbit_pitch_limit)
+
+                    if orbit_yaw > math.pi:
+                        orbit_yaw -= math.tau
+                    elif orbit_yaw < -math.pi:
+                        orbit_yaw += math.tau
+
+                orbit_rotation = Vec3(orbit_pitch, orbit_yaw, 0.0) if not is_cornell else Vec3(0.0, 0.0, 0.0)
+                combined_rotation = Vec3(
+                    rotation.x + orbit_rotation.x,
+                    rotation.y + orbit_rotation.y,
+                    rotation.z + orbit_rotation.z,
                 )
 
                 hud_lines = (f"FPS {smoothed_fps:5.1f}",)
+                if not is_cornell:
+                    hud_lines = hud_lines + ("Arrow keys: orbit camera",)
 
                 frame = engine.render(
                     mesh,
-                    rotation,
+                    combined_rotation,
                     translation=object_translation,
                     floor=floor,
-                    floor_rotation=floor_rotation,
+                    floor_rotation=orbit_rotation if (floor is not None and not is_cornell) else floor_rotation,
                     floor_translation=floor_translation,
                     cast_shadows=cast_shadows,
                     enable_reflections=enable_reflections,
