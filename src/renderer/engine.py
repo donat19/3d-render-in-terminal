@@ -7,7 +7,7 @@ from dataclasses import dataclass
 from typing import List, Optional, Sequence, Tuple
 
 
-@dataclass(frozen=True)
+@dataclass(frozen=True, slots=True)
 class Vec3:
     """Lightweight immutable 3D vector."""
 
@@ -60,7 +60,7 @@ class Vec3:
         return self / length
 
 
-@dataclass(frozen=True)
+@dataclass(frozen=True, slots=True)
 class Triangle:
     """A triangle with a fixed base color in ANSI 256-colour RGB cube coordinates."""
 
@@ -84,18 +84,18 @@ class Mesh:
         return iter(self._triangles)
 
 
-@dataclass(frozen=True)
+@dataclass(frozen=True, slots=True)
 class SceneTriangle:
     v0: Vec3
-    v1: Vec3
-    v2: Vec3
+    edge1: Vec3
+    edge2: Vec3
     normal: Vec3
     color: Tuple[int, int, int]
     reflective: float
     triangle_id: int
 
 
-@dataclass(frozen=True)
+@dataclass(frozen=True, slots=True)
 class HitInfo:
     distance: float
     point: Vec3
@@ -105,7 +105,7 @@ class HitInfo:
     triangle_id: int
 
 
-@dataclass(frozen=True)
+@dataclass(frozen=True, slots=True)
 class TraceResult:
     rgb: Tuple[float, float, float]
 
@@ -242,26 +242,25 @@ class RenderEngine:
         def add_mesh(source: Mesh, rot: Vec3, trans: Vec3, reflective: float) -> None:
             nonlocal triangle_id
             for triangle in source:
-                transformed = [
-                    self._transform_vertex(vertex, rot, trans)
-                    for vertex in triangle.vertices
-                ]
+                v0 = self._transform_vertex(triangle.vertices[0], rot, trans)
+                v1 = self._transform_vertex(triangle.vertices[1], rot, trans)
+                v2 = self._transform_vertex(triangle.vertices[2], rot, trans)
 
-                if any(vertex.z <= self.near_clip for vertex in transformed):
+                if v0.z <= self.near_clip or v1.z <= self.near_clip or v2.z <= self.near_clip:
                     continue
 
-                normal = (transformed[1] - transformed[0]).cross(
-                    transformed[2] - transformed[0]
-                )
+                edge1 = v1 - v0
+                edge2 = v2 - v0
+                normal = edge1.cross(edge2)
                 if normal.length_squared() <= 1e-8:
                     continue
                 normal = normal.normalized()
 
                 scene.append(
                     SceneTriangle(
-                        transformed[0],
-                        transformed[1],
-                        transformed[2],
+                        v0,
+                        edge1,
+                        edge2,
                         normal,
                         triangle.base_color,
                         reflective,
@@ -311,10 +310,8 @@ class RenderEngine:
 
         px = ndc_x * self._aspect_ratio * self._tan_half_fov
         py = ndc_y * self._tan_half_fov
-        direction = Vec3(px, py, 1.0).normalized()
-        if direction.length_squared() <= 1e-8:
-            return Vec3(0.0, 0.0, 1.0)
-        return direction
+        inv_len = 1.0 / math.sqrt(px * px + py * py + 1.0)
+        return Vec3(px * inv_len, py * inv_len, inv_len)
 
     def _project(self, vertex: Vec3) -> Optional[Tuple[float, float, float]]:
         if vertex.z <= self.near_clip:
@@ -413,8 +410,8 @@ class RenderEngine:
     def _intersect_triangle(
         self, origin: Vec3, direction: Vec3, triangle: SceneTriangle
     ) -> Optional[float]:
-        edge1 = triangle.v1 - triangle.v0
-        edge2 = triangle.v2 - triangle.v0
+        edge1 = triangle.edge1
+        edge2 = triangle.edge2
         pvec = direction.cross(edge2)
         det = edge1.dot(pvec)
 
